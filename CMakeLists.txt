@@ -136,20 +136,15 @@ set(SDM_UI_SOURCES
     src/ui/resources.qrc
 )
 
-add_executable(SDM WIN32
-    src/main.cpp
-    ${SDM_CORE_SOURCES}
-    ${SDM_UI_SOURCES}
-)
+# Biblioteca estatica con el motor completo: la comparten el binario SDM y
+# las pruebas unitarias (evita recompilar el core por cada test).
+add_library(sdm_core STATIC ${SDM_CORE_SOURCES})
 
-target_include_directories(SDM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(sdm_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
-target_link_libraries(SDM PRIVATE
+target_link_libraries(sdm_core PUBLIC
     Qt6::Core
     Qt6::Gui
-    Qt6::Qml
-    Qt6::Quick
-    Qt6::QuickControls2
     Qt6::Network
     Qt6::WebSockets
     CURL::libcurl
@@ -157,6 +152,18 @@ target_link_libraries(SDM PRIVATE
     nlohmann_json::nlohmann_json
     fmt::fmt
     Threads::Threads
+)
+
+add_executable(SDM WIN32
+    src/main.cpp
+    ${SDM_UI_SOURCES}
+)
+
+target_link_libraries(SDM PRIVATE
+    sdm_core
+    Qt6::Qml
+    Qt6::Quick
+    Qt6::QuickControls2
 )
 
 # ---------------------------------------------------------------------------
