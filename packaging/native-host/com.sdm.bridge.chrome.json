@@ -1,0 +1,9 @@
+{
+  "name": "com.sdm.bridge",
+  "description": "Puente nativo de S-Download Manager (SDM)",
+  "path": "@SDM_NATIVE_HOST_PATH@",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://@EXTENSION_ID@/"
+  ]
+}

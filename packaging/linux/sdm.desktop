@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=S-Download Manager
+GenericName=Download Manager
+GenericName[es]=Gestor de descargas
+Comment=Gestor de descargas multihilo acelerado con HLS/DASH
+Comment[es]=Gestor de descargas multihilo acelerado con HLS/DASH
+Exec=SDM %u
+Icon=sdm
+Terminal=false
+Categories=Network;FileTransfer;
+Keywords=download;manager;hls;dash;video;internet;
+Keywords[es]=descarga;gestor;hls;dash;vídeo;internet;
+StartupNotify=true
+StartupWMClass=SDM

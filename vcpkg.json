@@ -1,0 +1,11 @@
+{
+  "name": "sdm",
+  "version": "1.0.0",
+  "description": "S-Download Manager (SDM) - gestor de descargas multihilo con puentes de navegador",
+  "dependencies": [
+    "curl",
+    "sqlite3",
+    "fmt",
+    "nlohmann-json"
+  ]
+}
