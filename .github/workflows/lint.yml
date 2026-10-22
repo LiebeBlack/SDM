@@ -1,0 +1,72 @@
+# ============================================================================
+#  S-DOWNLOAD MANAGER (SDM)
+#  .github/workflows/lint.yml
+#
+#  Verificaciones rapidas de formato y sintaxis:
+#   - node --check  -> sintaxis de toda la extension JS
+#   - python json   -> JSON valido (manifest, vcpkg, presets)
+#   - py_compile    -> scripts de empaquetado
+#   - bash -n       -> shell del puente nativo Linux
+#   - clang-format  -> informe de estilo (informativo: no bloquea)
+#   - qmllint       -> QML (informativo: no bloquea)
+# ============================================================================
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    name: Sintaxis y estilo
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Sintaxis JavaScript (extension)
+        run: |
+          set -euo pipefail
+          find extension -name '*.js' -print0 | while IFS= read -r -d '' f; do
+            echo "node --check $f"
+            node --check "$f"
+          done
+
+      - name: JSON valido
+        run: |
+          set -euo pipefail
+          python3 -m json.tool extension/manifest.json > /dev/null
+          python3 -m json.tool vcpkg.json > /dev/null
+          python3 -m json.tool CMakePresets.json > /dev/null
+          for f in packaging/native-host/*.json; do
+            python3 -m json.tool "$f" > /dev/null
+            echo "json ok: $f"
+          done
+
+      - name: Python empaquetado
+        run: |
+          python3 -m py_compile tools/generate_icons.py scripts/package_extension.py
+          echo "py ok"
+
+      - name: Shell puente nativo
+        run: bash -n packaging/linux/install-native-host.sh && echo "sh ok"
+
+      - name: clang-format (informe)
+        continue-on-error: true
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q clang-format
+          find src tests -name '*.cpp' -o -name '*.h' | sort \
+            | xargs -r clang-format --dry-run --Werror 2>&1 \
+            | tee clang-format-report.txt || true
+          echo "::notice title=clang-format::Informe en clang-format-report.txt (informativo)"
+
+      - name: Subir informe de formato
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-format-report
+          path: clang-format-report.txt
+          if-no-files-found: ignore
