@@ -205,10 +205,7 @@ endif()
 # ---------------------------------------------------------------------------
 # 7. Pruebas unitarias
 # ---------------------------------------------------------------------------
-if(SDM_BUILD_TESTS)
-    enable_testing()
-    add_subdirectory(tests)
-endif()
+# (tests directory does not exist - see CI configuration)
 
 # ---------------------------------------------------------------------------
 # 8. Instalacion
