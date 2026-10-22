@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "S-Download Manager (SDM)",
+  "version": "1.0.0",
+  "description": "Captura descargas y transmisiones de vídeo (HLS/DASH) y las envía al acelerador multihilo de S-Download Manager.",
+  "minimum_chrome_version": "110",
+  "permissions": [
+    "downloads",
+    "storage",
+    "nativeMessaging",
+    "webRequest",
+    "cookies",
+    "tabs",
+    "alarms",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background/service_worker.js"
+  },
+  "action": {
+    "default_title": "S-Download Manager",
+    "default_popup": "popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/media_detector.js", "content/content_script.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

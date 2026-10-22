@@ -1,0 +1,26 @@
+<RCC>
+    <qresource prefix="/">
+        <!-- Interfaz QML -->
+        <file alias="qml/main.qml">src/ui/qml/main.qml</file>
+
+        <!-- Tema (singletons) -->
+        <file alias="qml/theme/qmldir">src/ui/qml/theme/qmldir</file>
+        <file alias="qml/theme/Theme.qml">src/ui/qml/theme/Theme.qml</file>
+        <file alias="qml/theme/Style.qml">src/ui/qml/theme/Style.qml</file>
+
+        <!-- Componentes -->
+        <file alias="qml/components/SdmToolButton.qml">src/ui/qml/components/SdmToolButton.qml</file>
+        <file alias="qml/components/TopToolbar.qml">src/ui/qml/components/TopToolbar.qml</file>
+        <file alias="qml/components/Sidebar.qml">src/ui/qml/components/Sidebar.qml</file>
+        <file alias="qml/components/DownloadTable.qml">src/ui/qml/components/DownloadTable.qml</file>
+        <file alias="qml/components/SegmentBar.qml">src/ui/qml/components/SegmentBar.qml</file>
+        <file alias="qml/components/NewTaskModal.qml">src/ui/qml/components/NewTaskModal.qml</file>
+        <file alias="qml/components/SettingsDialog.qml">src/ui/qml/components/SettingsDialog.qml</file>
+
+        <!-- Recursos graficos (SVG) -->
+        <file alias="assets/logo.svg">src/ui/assets/logo.svg</file>
+        <file alias="assets/icon.svg">src/ui/assets/icon.svg</file>
+        <file alias="assets/download.svg">src/ui/assets/download.svg</file>
+        <file alias="assets/folder.svg">src/ui/assets/folder.svg</file>
+    </qresource>
+</RCC>

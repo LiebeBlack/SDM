@@ -1,0 +1,316 @@
+/* ==========================================================================
+   S-DOWNLOAD MANAGER (SDM) — extension/popup/popup.css
+   Tema Fluent oscuro (spec cap. 4): Mica oscuro, esquinas 8px, acento verde.
+   ========================================================================== */
+
+:root {
+  --bg: #202020;
+  --card: #2b2b2b;
+  --card-hover: #323232;
+  --stroke: #3a3a3a;
+  --text: #ffffff;
+  --text-secondary: #c5c5c5;
+  --accent: #107c10;
+  --accent-hover: #0f6d0f;
+  --danger: #c42b1c;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 340px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* --- Cabecera ------------------------------------------------------------- */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--stroke);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+}
+
+.brand-text h1 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.connection {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.connection.ok { color: #6ccb5f; }
+.connection.bad { color: #f1707b; }
+
+/* --- Switch --------------------------------------------------------------- */
+
+.switch {
+  position: relative;
+  width: 40px;
+  height: 20px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  inset: 0;
+  background: #5a5a5a;
+  border: 1px solid var(--text-secondary);
+  border-radius: 10px;
+  transition: background 120ms ease;
+  cursor: pointer;
+}
+
+.slider::before {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  left: 3px;
+  top: 3px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 120ms ease;
+}
+
+.switch input:checked + .slider {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.switch input:checked + .slider::before {
+  transform: translateX(20px);
+}
+
+/* --- Tarjetas ------------------------------------------------------------- */
+
+main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  max-height: 460px;
+  overflow-y: auto;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.card h2 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  color: var(--text-secondary);
+}
+
+.stat-row strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Controles ------------------------------------------------------------- */
+
+input[type="url"],
+input[type="text"],
+select {
+  width: 100%;
+  padding: 7px 10px;
+  margin-bottom: 8px;
+  background: #1c1c1c;
+  border: 1px solid var(--stroke);
+  border-bottom-color: var(--text-secondary);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+input:focus,
+select:focus {
+  border-bottom: 2px solid var(--accent);
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+button.primary {
+  width: 100%;
+  background: var(--accent);
+  color: #fff;
+}
+
+button.primary:hover { background: var(--accent-hover); }
+
+button.secondary {
+  background: #3a3a3a;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+button.secondary:hover { background: #454545; }
+
+button.ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--stroke);
+  width: 100%;
+}
+
+button.ghost:hover { background: var(--card-hover); }
+
+.field {
+  margin-bottom: 8px;
+}
+
+.field label {
+  display: block;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-field label {
+  margin-bottom: 0;
+  color: var(--text);
+}
+
+.blocked-row {
+  display: flex;
+  gap: 8px;
+}
+
+.blocked-row input {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.blocked-row button {
+  margin-bottom: 0;
+}
+
+.blocked-list {
+  list-style: none;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.blocked-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  background: #1c1c1c;
+  border-radius: 6px;
+}
+
+.blocked-list button {
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.hint {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+code {
+  background: #1c1c1c;
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.feedback {
+  min-height: 14px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.feedback.ok { color: #6ccb5f; }
+.feedback.err { color: #f1707b; }
+
+/* --- Pie ------------------------------------------------------------------- */
+
+.footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--stroke);
+  color: var(--text-secondary);
+  font-size: 11px;
+  min-height: 30px;
+}
+
+/* Scrollbar Fluent */
+main::-webkit-scrollbar { width: 8px; }
+main::-webkit-scrollbar-thumb {
+  background: #5a5a5a;
+  border-radius: 4px;
+}

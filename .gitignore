@@ -1,0 +1,63 @@
+# ---- Build ----
+build/
+cmake-build-*/
+out/
+dist/
+stage/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dll
+*.dylib
+*.exe
+*.pdb
+*.ilk
+*.idb
+compile_commands.json
+CMakeUserPresets.json
+
+# ---- Qt / moc ----
+moc_*.cpp
+qrc_*.cpp
+*.qmlc
+*.jsc
+.qmake.stash
+*.pro.user
+
+# ---- Empaquetado ----
+*.AppImage
+*.deb
+*.rpm
+*.msi
+*.zip
+*.tar.gz
+packaging/windows/build/
+
+# ---- Artefactos de descarga (pruebas locales) ----
+*.part
+*.part.*
+sdm.sqlite3
+sdm.sqlite3-*
+
+# ---- Python (herramientas) ----
+__pycache__/
+*.pyc
+.venv/
+
+# ---- IDE / SO ----
+.vs/
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# ---- Secretos ----
+.env
+*.pem
+*.key
+bridge.json

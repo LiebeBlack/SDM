@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>S-Download Manager</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="brand">
+      <span class="logo">⬇</span>
+      <div class="brand-text">
+        <h1>S-Download Manager</h1>
+        <p id="connection-label" class="connection">Conectando…</p>
+      </div>
+    </div>
+    <label class="switch" title="Activar captura">
+      <input type="checkbox" id="enabled-toggle" />
+      <span class="slider"></span>
+    </label>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="stat-row">
+        <span>Activas</span><strong id="stat-active">0</strong>
+      </div>
+      <div class="stat-row">
+        <span>En cola</span><strong id="stat-queued">0</strong>
+      </div>
+      <div class="stat-row">
+        <span>Total</span><strong id="stat-total">0</strong>
+      </div>
+      <div class="stat-row">
+        <span>Velocidad global</span><strong id="stat-speed">0 B/s</strong>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Descarga rápida</h2>
+      <input type="url" id="quick-url" placeholder="https://ejemplo.com/archivo.zip" />
+      <button id="quick-add" class="primary">Añadir a SDM</button>
+      <p id="quick-feedback" class="feedback"></p>
+    </section>
+
+    <section class="card">
+      <h2>Ajustes</h2>
+      <div class="field">
+        <label for="threads-select">Hilos por tarea</label>
+        <select id="threads-select">
+          <option value="0">Automático</option>
+          <option value="4">4 hilos</option>
+          <option value="8">8 hilos</option>
+          <option value="16">16 hilos</option>
+          <option value="32">32 hilos</option>
+        </select>
+      </div>
+      <div class="field checkbox-field">
+        <input type="checkbox" id="autostart-toggle" />
+        <label for="autostart-toggle">Arrancar tareas automáticamente</label>
+      </div>
+      <div class="field checkbox-field">
+        <input type="checkbox" id="media-toggle" />
+        <label for="media-toggle">Capturar transmisiones (HLS/DASH)</label>
+      </div>
+      <div class="field checkbox-field">
+        <input type="checkbox" id="refresh-toggle" />
+        <label for="refresh-toggle">Refrescar enlaces caducados</label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Sitios excluidos</h2>
+      <div class="blocked-row">
+        <input type="text" id="blocked-input" placeholder="ejemplo.com" />
+        <button id="blocked-add" class="secondary">Excluir</button>
+      </div>
+      <ul id="blocked-list" class="blocked-list"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Puente local</h2>
+      <p class="hint">Clave de conexión <code>puerto:token</code> del panel de SDM
+        (Ajustes → Puente). El canal nativo se usa si está instalado.</p>
+      <div class="blocked-row">
+        <input type="text" id="key-input" placeholder="9010:abcdef..." />
+        <button id="key-save" class="secondary">Guardar</button>
+      </div>
+      <button id="key-test" class="ghost">Probar conexión</button>
+      <p id="bridge-feedback" class="feedback"></p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span id="toast-line"></span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
