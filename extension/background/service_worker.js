@@ -1,4 +1,4 @@
-// ============================================================================
+// ===========================================================================
 //  S-DOWNLOAD MANAGER (SDM)
 //  extension/background/service_worker.js
 //
@@ -11,7 +11,7 @@
 //
 //  Protocolo JSON: { "type": "...", "ref": "...", "payload": { ... } }
 //  (documentado en docs/PROTOCOL.md; servidor en src/bridge/ProtocolHandler.cpp)
-// ============================================================================
+// ===========================================================================
 
 "use strict";
 
@@ -111,6 +111,7 @@ function fileExtensionOf(url) {
     return last.substring(dot + 1).toLowerCase();
   } catch {
     return "";
+  }
 }
 
 function looksLikeMediaManifest(url) {
@@ -187,7 +188,7 @@ function connectWebSocket() {
   try {
     ws = new WebSocket(`ws://127.0.0.1:${parsed.port}/?token=${encodeURIComponent(parsed.token)}`);
   } catch (e) {
-    log("WebSocket构造 fallo:", e && e.message);
+    log("WebSocket fallo:", e && e.message);
     ws = null;
     scheduleWsRetry();
     return;

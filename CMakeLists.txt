@@ -136,6 +136,27 @@ set(SDM_UI_SOURCES
     src/ui/resources.qrc
 )
 
+set(SDM_UI_QML_FILES
+    src/ui/qml/main.qml
+    src/ui/qml/theme/qmldir
+    src/ui/qml/theme/Theme.qml
+    src/ui/qml/theme/Style.qml
+    src/ui/qml/components/SdmToolButton.qml
+    src/ui/qml/components/TopToolbar.qml
+    src/ui/qml/components/Sidebar.qml
+    src/ui/qml/components/DownloadTable.qml
+    src/ui/qml/components/SegmentBar.qml
+    src/ui/qml/components/NewTaskModal.qml
+    src/ui/qml/components/SettingsDialog.qml
+)
+
+set(SDM_UI_ASSET_FILES
+    src/ui/assets/logo.svg
+    src/ui/assets/icon.svg
+    src/ui/assets/download.svg
+    src/ui/assets/folder.svg
+)
+
 # Biblioteca estatica con el motor completo: la comparten el binario SDM y
 # las pruebas unitarias (evita recompilar el core por cada test).
 add_library(sdm_core STATIC ${SDM_CORE_SOURCES})
@@ -157,10 +178,13 @@ target_link_libraries(sdm_core PUBLIC
 add_executable(SDM WIN32
     src/main.cpp
     ${SDM_UI_SOURCES}
+    ${SDM_UI_QML_FILES}
+    ${SDM_UI_ASSET_FILES}
 )
 
 target_link_libraries(SDM PRIVATE
     sdm_core
+    sdm_bridge
     Qt6::Qml
     Qt6::Quick
     Qt6::QuickControls2
@@ -174,11 +198,19 @@ add_executable(SDMNativeHost
     src/bridge/NativeMessagingHost.cpp
 )
 
+target_include_directories(SDMNativeHost PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_library(sdm_bridge STATIC
+    src/bridge/ProtocolHandler.h
+    src/bridge/ProtocolHandler.cpp
+)
+
 target_include_directories(SDMNativeHost PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(SDMNativeHost PRIVATE
     Qt6::Core
     Qt6::Network
     Qt6::WebSockets
+    sdm_bridge
 )
 
 # ---------------------------------------------------------------------------
@@ -212,7 +244,7 @@ endif()
 # ---------------------------------------------------------------------------
 include(GNUInstallDirs)
 
-install(TARGETS SDM SDMNativeHost
+install(TARGETS SDM SDMNativeHost sdm_bridge
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     BUNDLE DESTINATION "."
 )
@@ -223,6 +255,8 @@ if(UNIX AND NOT APPLE)
     install(FILES src/ui/assets/logo.svg
         DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
         RENAME "sdm.svg")
+    install(FILES packaging/native-host/com.sdm.bridge.chrome.json
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/com.sdm.bridge")
 endif()
 
 message(STATUS "SDM ${PROJECT_VERSION} configurado (tests: ${SDM_BUILD_TESTS}, gui: ${SDM_BUILD_UI})")
