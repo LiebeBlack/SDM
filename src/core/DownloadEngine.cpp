@@ -1444,28 +1444,33 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
 
     // --- Servidor sin soporte de Range: degradacion a 1 hilo ---------------
     if (outcome == SegmentResult::RangeUnsupported && !stopping && !refreshing && !removing && !degrading) {
-        if (runtime == nullptr) {
-            return;
-        }
-        runtime->degradePending = true;
-        runtime->rangeSupported = false;
-        task->threadCount = 1;
-        for (SegmentWorker* worker : runtime->workers) {
-            if (worker != nullptr) {
-                worker->requestAbort();
+        if (runtime != nullptr) {
+            runtime->degradePending = true;
+            runtime->rangeSupported = false;
+            task->threadCount = 1;
+            for (SegmentWorker* worker : runtime->workers) {
+                if (worker != nullptr) {
+                    worker->requestAbort();
+                }
             }
-        }
-        if (runtime->workers.isEmpty()) {
+            if (runtime->workers.isEmpty()) {
+                applyDegrade(taskId);
+                return;
+            }
+        } else {
+            // Runtime ya no existe: la tarea se degrada directamente sin
+            // depender de un ciclo de workers/abort.
             applyDegrade(taskId);
+            return;
         }
         return;
     }
 
-    // --- Paradas en curso (pausa / borrado / refresco) ---------------------
+    // --- Paradas en curso (pausa / borrado / refresco / degradacion) -------
     if (stopping || refreshing || removing || degrading) {
-        if (runtime != nullptr && runtime->workers.isEmpty()) {
+        if (runtime == nullptr || runtime->workers.isEmpty()) {
             if (removing) {
-                const bool deleteFiles = runtime->removeDeleteFile;
+                const bool deleteFiles = runtime != nullptr ? runtime->removeDeleteFile : false;
                 removeInternal(taskId, deleteFiles);
                 return;
             }
