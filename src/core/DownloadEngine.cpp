@@ -1453,18 +1453,14 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
                     worker->requestAbort();
                 }
             }
-            if (runtime->workers.isEmpty()) {
+            } else {
+                // Runtime ya no existe: la tarea se degrada directamente,
+                // sin depender de un ciclo de workers/abort.
                 applyDegrade(taskId);
                 return;
             }
-        } else {
-            // Runtime ya no existe: la tarea se degrada directamente sin
-            // depender de un ciclo de workers/abort.
-            applyDegrade(taskId);
             return;
         }
-        return;
-    }
 
     // --- Paradas en curso (pausa / borrado / refresco / degradacion) -------
     if (stopping || refreshing || removing || degrading) {
