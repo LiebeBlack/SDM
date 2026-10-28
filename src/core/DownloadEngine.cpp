@@ -413,7 +413,7 @@ void DownloadEngine::shutdown() {
 
     // Detiene todos los workers y espera a sus hilos.
     for (auto it = m_runtimes.begin(); it != m_runtimes.end(); ++it) {
-        Runtime* runtime = it.value().get();
+        Runtime* runtime = it.value();
         runtime->stopRequested = true;
         runtime->refreshStopping = false;
         runtime->removePending = false;
@@ -424,7 +424,7 @@ void DownloadEngine::shutdown() {
         }
     }
     for (auto it = m_runtimes.begin(); it != m_runtimes.end(); ++it) {
-        Runtime* runtime = it.value().get();
+        Runtime* runtime = it.value();
         for (QThread* thread : runtime->threads) {
             if (thread != nullptr) {
                 thread->quit();
@@ -448,6 +448,7 @@ void DownloadEngine::shutdown() {
             }
         }
     }
+    qDeleteAll(m_runtimes);
     m_runtimes.clear(); // destructores cierran los FileAllocator
 
     if (m_stream != nullptr) {
@@ -472,6 +473,7 @@ void DownloadEngine::updateSettings(const EngineSettings& settings) {
 void DownloadEngine::restoreFromDatabase() {
     m_tasks.clear();
     m_index.clear();
+    qDeleteAll(m_runtimes);
     m_runtimes.clear();
 
     if (m_db != nullptr && m_db->isOpen()) {
@@ -535,9 +537,9 @@ DownloadEngine::Runtime* DownloadEngine::runtimeFor(quint64 id, bool create) {
     if (!create) {
         return nullptr;
     }
-    auto runtime = std::make_unique<Runtime>();
-    Runtime* raw = runtime.get();
-    m_runtimes[id] = std::move(runtime);
+    auto runtime = new Runtime();
+    Runtime* raw = runtime;
+    m_runtimes[id] = runtime;
     return raw;
 }
 
@@ -1891,7 +1893,7 @@ void DownloadEngine::destroyRuntime(quint64 id) {
     if (it == m_runtimes.end()) {
         return;
     }
-    Runtime* runtime = it.value().get();
+    Runtime* runtime = it.value();
     if (runtime->refreshTimer != nullptr) {
         runtime->refreshTimer->stop();
         runtime->refreshTimer->deleteLater();
@@ -1906,6 +1908,7 @@ void DownloadEngine::destroyRuntime(quint64 id) {
         delete runtime->io;
         runtime->io = nullptr;
     }
+    delete runtime;
     m_runtimes.erase(it);
 }
 
@@ -2071,7 +2074,7 @@ void DownloadEngine::tick() {
 
     for (auto it = m_runtimes.begin(); it != m_runtimes.end(); ++it) {
         const quint64 id = it.key();
-        Runtime* runtime = it.value().get();
+        Runtime* runtime = it.value();
         DownloadTask* task = mutableTask(id);
         if (task == nullptr || runtime == nullptr) {
             continue;

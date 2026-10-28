@@ -198,7 +198,7 @@ private:
 
     QList<DownloadTask> m_tasks;
     QHash<quint64, qsizetype> m_index;
-    QHash<quint64, std::unique_ptr<Runtime>> m_runtimes;
+    QHash<quint64, Runtime*> m_runtimes;
     QHash<quint64, ProbeResult> m_probeResults;
     mutable QMutex m_probeMutex;
 
