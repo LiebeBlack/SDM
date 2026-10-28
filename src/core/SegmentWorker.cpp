@@ -205,7 +205,7 @@ bool SegmentWorker::performOnce(int* httpStatus, bool* rangeIgnored, QString* er
             *error = QString::fromUtf8(curl_easy_strerror(rc));
         }
     } else {
-        *error.clear();
+        error->clear();
     }
 
     curl_slist_free_all(slist);

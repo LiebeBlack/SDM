@@ -537,7 +537,7 @@ DownloadEngine::Runtime* DownloadEngine::runtimeFor(quint64 id, bool create) {
     }
     auto runtime = std::make_unique<Runtime>();
     Runtime* raw = runtime.get();
-    m_runtimes.insert(id, std::move(runtime));
+    m_runtimes[id] = std::move(runtime);
     return raw;
 }
 

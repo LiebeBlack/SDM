@@ -258,7 +258,7 @@ inline QList<SegmentInfo> splitRangeIntoSegments(qint64 total, int threads) {
     // Si el archivo es mas peque;o que threadCount * minimo, usa 1 hilo util.
     int usable = threads;
     if (total < kMinSegmentBytes * threads) {
-        usable = std::max<qint64>(1, total / kMinSegmentBytes);
+        usable = static_cast<int>(std::max<qint64>(1, total / kMinSegmentBytes));
         usable = std::max(usable, 1);
         if (total < kMinSegmentBytes) {
             usable = 1;
@@ -289,9 +289,9 @@ inline QList<SegmentInfo> splitRangeIntoSegments(qint64 total, int threads) {
 
 /// Extension minuscula sin punto ("" si no hay extension).
 inline QString lowerExtension(const QString& fileName) {
-    const int slash = std::max(fileName.lastIndexOf(QLatin1Char('/')), fileName.lastIndexOf(QLatin1Char('\\')));
+    const int slash = static_cast<int>(std::max(fileName.lastIndexOf(QLatin1Char('/')), fileName.lastIndexOf(QLatin1Char('\\'))));
     const QString base = fileName.mid(slash + 1);
-    const int dot = base.lastIndexOf(QLatin1Char('.'));
+    const int dot = static_cast<int>(base.lastIndexOf(QLatin1Char('.')));
     if (dot <= 0 || dot == base.size() - 1) {
         return QString();
     }
@@ -360,15 +360,15 @@ inline FileCategory categoryForFileName(const QString& fileName) {
 inline QString fileNameFromUrl(const QString& url) {
     // Cortamos query y fragment.
     QString clean = url;
-    const int q = clean.indexOf(QLatin1Char('?'));
+    const int q = static_cast<int>(clean.indexOf(QLatin1Char('?')));
     if (q >= 0) {
         clean = clean.left(q);
     }
-    const int h = clean.indexOf(QLatin1Char('#'));
+    const int h = static_cast<int>(clean.indexOf(QLatin1Char('#')));
     if (h >= 0) {
         clean = clean.left(h);
     }
-    const int slash = clean.lastIndexOf(QLatin1Char('/'));
+    const int slash = static_cast<int>(clean.lastIndexOf(QLatin1Char('/')));
     QString name = clean.mid(slash + 1);
     // Descodificacion minima de %20 y cia.
     name.replace(QStringLiteral("%20"), QStringLiteral(" "));

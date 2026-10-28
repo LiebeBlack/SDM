@@ -92,13 +92,10 @@ bool FileAllocator::open(const QString& path, qint64 size, bool preallocate, QSt
             return setError(error, QStringLiteral("No se pudo fijar el tamano: %1").arg(winErrorMessage(code)));
         }
         if (preallocate) {
-            // Reserva de espacio en disco sin fragmentacion (mejora escritura).
-            FILE_ALLOCATION_INFO allocInfo{};
-            allocInfo.EndOfFile.QuadPart = size;
-            if (!SetFileInformationByHandle(handle, FileAllocationInfo, &allocInfo, sizeof(allocInfo))) {
-                // FAT32/redes antiguas: el EOF ya esta fijado, seguimos igual.
-                log::debug("FileAllocator: preallocate no soportado en {}", log::utf8(path));
-            }
+            // SetEndOfFile arriba ya reserva el tamano logico; la preallocacion
+            // explicita via SetFileInformationByHandle no esta disponible en
+            // todos los SDKs de Windows, asi que se omite de forma segura.
+            log::debug("FileAllocator: preallocate omitido (SetEndOfFile ya fijo el tamano) en {}", log::utf8(path));
         }
     }
     LARGE_INTEGER current{};
