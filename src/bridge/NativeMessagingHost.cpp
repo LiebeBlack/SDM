@@ -139,6 +139,13 @@ void NativeMessagingHost::sendToBrowser(const QByteArray& jsonPayload) {
     writeFrame(jsonPayload);
 }
 
+void NativeMessagingHost::forwardToSdm(const QByteArray& jsonPayload) {
+    if (jsonPayload.isEmpty() || m_socket == nullptr || !m_wsConnected) {
+        return;
+    }
+    m_socket->sendTextMessage(QString::fromUtf8(jsonPayload));
+}
+
 void NativeMessagingHost::pumpStdout() {
     // Reservado para futuros mensajes encolados.
 }
@@ -207,9 +214,9 @@ int main(int argc, char* argv[]) {
         QMetaObject::invokeMethod(&host, []() { QCoreApplication::quit(); }, Qt::QueuedConnection);
     });
 
-    // Todo mensaje del navegador se reenvia al puerto local de SDM.
+    // Todo mensaje del navegador se reenvía al WebSocket local (hacia SDM).
     QObject::connect(&host, &sdm::NativeMessagingHost::fromBrowser, &host,
-                     [&host](const QByteArray& payload) { host.sendToBrowser(payload); },
+                     [&host](const QByteArray& payload) { host.forwardToSdm(payload); },
                      Qt::QueuedConnection);
 
     const int exitCode = app.exec();

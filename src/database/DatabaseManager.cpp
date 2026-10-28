@@ -375,11 +375,10 @@ bool DatabaseManager::updateUrl(quint64 id, const QString& url, const QString& c
     int i = 1;
     bindText(stmt, i++, url);
     bindText(stmt, i++, cookies);
-    bindText(stmt, i++, referer);
-    bindText(stmt, i++, referer);
-    bindText(stmt, i++, referer);
-    bindInt(stmt, i++, QDateTime::currentSecsSinceEpoch());
-    bindInt(stmt, i++, static_cast<qint64>(id));
+    bindText(stmt, i++, referer);   // CASE WHEN ?=''
+    bindText(stmt, i++, referer);   // ELSE ?
+    bindInt(stmt, i++, QDateTime::currentSecsSinceEpoch());  // updated_at
+    bindInt(stmt, i++, static_cast<qint64>(id));            // WHERE id=?
 
     bool ok = true;
     if (sqlite3_step(stmt) != SQLITE_DONE) {

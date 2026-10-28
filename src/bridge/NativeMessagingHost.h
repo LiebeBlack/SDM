@@ -31,6 +31,9 @@ public:
     /// Encola un mensaje JSON hacia STDOUT (lo escribe el bucle principal).
     void sendToBrowser(const QByteArray& jsonPayload);
 
+    /// Reenvía un mensaje recibido del navegador al WebSocket local (hacia SDM).
+    void forwardToSdm(const QByteArray& jsonPayload);
+
 signals:
     /// Mensaje recibido del navegador (ya leido de STDIN).
     void fromBrowser(const QByteArray& jsonPayload);

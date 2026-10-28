@@ -175,6 +175,19 @@ target_link_libraries(sdm_core PUBLIC
     Threads::Threads
 )
 
+add_library(sdm_bridge STATIC
+    src/bridge/ProtocolHandler.h
+    src/bridge/ProtocolHandler.cpp
+)
+
+target_include_directories(SDMNativeHost PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(SDMNativeHost PRIVATE
+    Qt6::Core
+    Qt6::Network
+    Qt6::WebSockets
+    sdm_bridge
+)
+
 add_executable(SDM WIN32
     src/main.cpp
     ${SDM_UI_SOURCES}
@@ -188,29 +201,6 @@ target_link_libraries(SDM PRIVATE
     Qt6::Qml
     Qt6::Quick
     Qt6::QuickControls2
-)
-
-# ---------------------------------------------------------------------------
-# 5. Puente Native Messaging (canal primario STDIN/STDOUT)
-# ---------------------------------------------------------------------------
-add_executable(SDMNativeHost
-    src/bridge/NativeMessagingHost.h
-    src/bridge/NativeMessagingHost.cpp
-)
-
-target_include_directories(SDMNativeHost PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-
-add_library(sdm_bridge STATIC
-    src/bridge/ProtocolHandler.h
-    src/bridge/ProtocolHandler.cpp
-)
-
-target_include_directories(SDMNativeHost PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(SDMNativeHost PRIVATE
-    Qt6::Core
-    Qt6::Network
-    Qt6::WebSockets
-    sdm_bridge
 )
 
 # ---------------------------------------------------------------------------
