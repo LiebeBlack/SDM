@@ -532,7 +532,7 @@ DownloadTask* DownloadEngine::mutableTask(quint64 id) {
 DownloadEngine::Runtime* DownloadEngine::runtimeFor(quint64 id, bool create) {
     auto it = m_runtimes.find(id);
     if (it != m_runtimes.end()) {
-        return it.value().get();
+        return it.value();
     }
     if (!create) {
         return nullptr;
