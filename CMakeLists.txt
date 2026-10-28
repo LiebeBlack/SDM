@@ -180,6 +180,13 @@ add_library(sdm_bridge STATIC
     src/bridge/ProtocolHandler.cpp
 )
 
+target_link_libraries(sdm_bridge PRIVATE sdm_core)
+
+add_executable(SDMNativeHost
+    src/bridge/NativeMessagingHost.h
+    src/bridge/NativeMessagingHost.cpp
+)
+
 target_include_directories(SDMNativeHost PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(SDMNativeHost PRIVATE
     Qt6::Core
