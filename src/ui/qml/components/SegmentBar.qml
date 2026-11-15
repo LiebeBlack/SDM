@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import "../theme"
 
 // Monitor de hilos en tiempo real (spec 4.2.3 - Segment Visualizer).
+// Barras animadas por segmento con colores de estado y telemetría.
 Rectangle {
     id: segmentPanel
 
@@ -13,7 +14,15 @@ Rectangle {
 
     height: Style.segmentHeight
     color: Theme.surface
-    border.color: Theme.border
+
+    // Borde superior sutil.
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: 1
+        color: Theme.border
+    }
 
     function refresh() {
         if (taskId && taskId > 0) {
@@ -25,6 +34,7 @@ Rectangle {
         }
     }
 
+    // Muestreo a 2 Hz (suficiente para el monitor y barato en recursos).
     Timer {
         interval: 500
         running: true
@@ -51,7 +61,7 @@ Rectangle {
                 color: Theme.subtleText
             }
             Rectangle {
-                radius: 8
+                radius: Style.radiusPill
                 color: Theme.bg
                 border.color: Theme.border
                 implicitWidth: hilosText.implicitWidth + 16
@@ -62,13 +72,13 @@ Rectangle {
                     text: "HILOS: " + (segmentPanel.info.threads !== undefined ? segmentPanel.info.threads : 1)
                           + (segmentPanel.info.state === 2 ? " ACTIVOS" : " EN ESPERA")
                     font.pixelSize: Style.fontSizeSmall
-                    font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+                    font.family: Style.fontMono
                     color: Theme.text
                 }
             }
             Rectangle {
                 visible: segmentPanel.info.stateText !== undefined
-                radius: 8
+                radius: Style.radiusPill
                 color: Theme.bg
                 border.color: Theme.border
                 implicitWidth: estadoText.implicitWidth + 16
@@ -94,7 +104,7 @@ Rectangle {
             }
         }
 
-        // Barras de segmentos (colores por estado)
+        // Barras de segmentos (colores por estado, animadas)
         RowLayout {
             Layout.fillWidth: true
             Layout.preferredHeight: 26
@@ -115,15 +125,18 @@ Rectangle {
                         width: parent.width * Math.min(1.0, Math.max(0.0, model.progress))
                         height: parent.height
                         radius: 3
-                        color: model.color
-                        Behavior on width { NumberAnimation { duration: 180 } }
-                        Behavior on color { ColorAnimation { duration: Style.animNormal } }
+                        gradient: Gradient {
+                            orientation: Gradient.Vertical
+                            GradientStop { position: 0.0; color: Qt.lighter(model.color, 1.2) }
+                            GradientStop { position: 1.0; color: model.color }
+                        }
+                        Behavior on width { NumberAnimation { duration: 180; easing.type: Style.easeOut } }
                     }
                     Text {
                         anchors.centerIn: parent
                         text: model.segmentIndex + 1
                         font.pixelSize: Style.fontSizeSmall
-                        font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+                        font.family: Style.fontMono
                         color: "#ffffff"
                         style: Text.Raised
                         styleColor: "#66000000"
@@ -156,43 +169,53 @@ Rectangle {
             Text {
                 text: "Velocidad Global: " + bridge.globalSpeedText
                 font.pixelSize: Style.fontSizeSmall
-                font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+                font.family: Style.fontMono
                 color: Theme.success
             }
             Text {
                 text: "Restante: " + (segmentPanel.info.etaText !== undefined ? segmentPanel.info.etaText : "--")
                 font.pixelSize: Style.fontSizeSmall
-                font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+                font.family: Style.fontMono
                 color: Theme.subtleText
             }
             Text {
                 text: "Recibido: " + (segmentPanel.info.receivedText !== undefined ? segmentPanel.info.receivedText : "--")
                       + " / " + (segmentPanel.info.sizeText !== undefined ? segmentPanel.info.sizeText : "--")
                 font.pixelSize: Style.fontSizeSmall
-                font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+                font.family: Style.fontMono
                 color: Theme.subtleText
             }
             Text {
                 text: "Disco: " + (segmentPanel.info.progressText !== undefined ? segmentPanel.info.progressText : "--")
                 font.pixelSize: Style.fontSizeSmall
-                font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+                font.family: Style.fontMono
                 color: Theme.subtleText
             }
             Text {
                 text: "RAM: " + bridge.memoryMb.toFixed(1) + " MB"
                 font.pixelSize: Style.fontSizeSmall
-                font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+                font.family: Style.fontMono
                 color: Theme.subtleText
             }
 
             Item { Layout.fillWidth: true }
 
-            Text {
-                text: segmentPanel.info.error !== undefined && segmentPanel.info.error !== ""
-                      ? segmentPanel.info.error : ""
-                font.pixelSize: Style.fontSizeSmall
-                color: Theme.danger
-                elide: Text.ElideRight
+            // Mensaje de error prominente.
+            Rectangle {
+                visible: segmentPanel.info.error !== undefined && segmentPanel.info.error !== ""
+                radius: Style.radiusSmall
+                color: Theme.dangerSoft
+                implicitWidth: errText.implicitWidth + 16
+                implicitHeight: 20
+
+                Text {
+                    id: errText
+                    anchors.centerIn: parent
+                    text: segmentPanel.info.error !== undefined ? segmentPanel.info.error : ""
+                    font.pixelSize: Style.fontSizeSmall
+                    color: Theme.danger
+                    elide: Text.ElideRight
+                }
                 Layout.maximumWidth: 420
             }
         }

@@ -4,7 +4,9 @@ import QtQuick.Layouts
 import "../theme"
 
 // Tabla principal virtualizada (spec 4.2.2): ListView solo instancia las
-// filas visibles, por que soporta listas de 50.000+ descargas sin coste.
+// filas visibles, por lo que soporta listas de 50.000+ descargas sin coste.
+// Renderizado Fluent: píldoras de estado, barras con degradado y
+// animaciones de entrada/selección.
 Rectangle {
     id: table
 
@@ -55,9 +57,16 @@ Rectangle {
         clip: true
         spacing: 1
         boundsBehavior: Flickable.StopAtBounds
+        reuseItems: true
         ScrollBar.vertical: ScrollBar {
             id: scrollBar
             policy: ScrollBar.AsNeeded
+        }
+
+        // Animacion de entrada de filas nuevas.
+        add: Transition {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Style.animNormal; easing.type: Style.easeOut }
+            NumberAnimation { property: "x"; from: -24; to: 0; duration: Style.animNormal; easing.type: Style.easeOut }
         }
 
         delegate: Item {
@@ -68,6 +77,8 @@ Rectangle {
             required property int index
             required property var model
 
+            readonly property color stateColor: Theme.stateColor(row.model.state)
+
             // Fondo de fila
             Rectangle {
                 anchors.fill: parent
@@ -76,7 +87,18 @@ Rectangle {
                 Behavior on color { ColorAnimation { duration: Style.animFast } }
             }
 
-            // Indicador de actividad (progreso tenue tras la fila)
+            // Indicador lateral de estado (barra de acento a la izquierda).
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 3
+                color: row.stateColor
+                opacity: row.model.state === 2 ? 1.0 : (ListView.isCurrentItem ? 0.8 : 0.35)
+                Behavior on opacity { NumberAnimation { duration: Style.animNormal } }
+            }
+
+            // Indicador de actividad (progreso tenue tras la fila).
             Rectangle {
                 width: parent.width * Math.min(1.0, Math.max(0.0, row.model.progress))
                 height: parent.height
@@ -91,32 +113,44 @@ Rectangle {
                 anchors.rightMargin: 8
                 spacing: 6
 
-                // Estado
-                Text {
+                // Estado (píldora animada)
+                Rectangle {
                     Layout.preferredWidth: Style.colState - 14
-                    text: row.model.stateIcon
-                    font.pixelSize: 14
-                    horizontalAlignment: Text.AlignHCenter
-                    color: Theme.text
-                }
+                    Layout.preferredHeight: 22
+                    radius: Style.radiusPill
+                    color: Qt.rgba(row.stateColor.r, row.stateColor.g, row.stateColor.b, 0.16)
 
-                // Nombre
-                Text {
-                    Layout.preferredWidth: Style.colName - 6
-                    text: row.model.name
-                    font.pixelSize: Style.fontSize
-                    color: Theme.text
-                    elide: Text.ElideRight
-                    MouseArea {
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        ToolTip.visible: containsMouse && parent.implicitWidth > parent.width
-                        ToolTip.text: row.model.name + "\n" + row.model.savePath
-                        ToolTip.delay: 700
+                    Text {
+                        anchors.centerIn: parent
+                        text: row.model.stateIcon
+                        font.pixelSize: 13
+                        color: row.stateColor
                     }
                 }
 
-                // Tamano
+                // Nombre + ruta
+                Column {
+                    Layout.preferredWidth: Style.colName - 6
+                    spacing: 1
+
+                    Text {
+                        width: parent.width
+                        text: row.model.name
+                        font.pixelSize: Style.fontSize
+                        color: Theme.text
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        width: parent.width
+                        text: row.model.categoryIcon + " " + row.model.categoryText
+                              + (row.model.isStream ? " · ▶ stream" : "")
+                        font.pixelSize: Style.fontSizeTiny
+                        color: Theme.subtleText
+                        elide: Text.ElideRight
+                    }
+                }
+
+                // Tamaño
                 Text {
                     Layout.preferredWidth: Style.colSize - 6
                     text: row.model.sizeText
@@ -125,10 +159,10 @@ Rectangle {
                     horizontalAlignment: Text.AlignRight
                 }
 
-                // Progreso (barra + porcentaje)
+                // Progreso (barra con degradado + porcentaje)
                 Item {
                     Layout.preferredWidth: Style.colProgress - 6
-                    Layout.preferredHeight: 20
+                    Layout.preferredHeight: 22
 
                     Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
@@ -138,12 +172,17 @@ Rectangle {
                         color: Theme.progressTrack
                     }
                     Rectangle {
+                        id: progressFill
                         anchors.verticalCenter: parent.verticalCenter
                         width: parent.width * Math.min(1.0, Math.max(0.0, row.model.progress))
                         height: 8
                         radius: 4
-                        color: Theme.stateColor(row.model.state)
-                        Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0.0; color: row.stateColor }
+                            GradientStop { position: 1.0; color: Qt.lighter(row.stateColor, 1.25) }
+                        }
+                        Behavior on width { NumberAnimation { duration: 180; easing.type: Style.easeOut } }
                     }
                     Text {
                         anchors.left: parent.left
@@ -151,7 +190,7 @@ Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
                         text: row.model.progressText
                         font.pixelSize: Style.fontSizeSmall
-                        font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+                        font.family: Style.fontMono
                         color: Theme.text
                     }
                     Text {
@@ -168,7 +207,7 @@ Rectangle {
                     Layout.preferredWidth: Style.colSpeed - 6
                     text: row.model.speedText
                     font.pixelSize: Style.fontSize
-                    font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+                    font.family: Style.fontMono
                     horizontalAlignment: Text.AlignRight
                     color: row.model.state === 2 ? Theme.success : Theme.subtleText
                 }
@@ -178,7 +217,7 @@ Rectangle {
                     Layout.preferredWidth: Style.colEta - 6
                     text: row.model.etaText
                     font.pixelSize: Style.fontSize
-                    font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+                    font.family: Style.fontMono
                     horizontalAlignment: Text.AlignRight
                     color: Theme.subtleText
                 }
@@ -217,6 +256,9 @@ Rectangle {
                 anchors.fill: parent
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
+                ToolTip.visible: containsMouse && !contextMenu.visible
+                ToolTip.text: row.model.name + "\n" + row.model.savePath
+                ToolTip.delay: 700
                 onClicked: function (mouse) {
                     list.currentIndex = row.index
                     bridge.selectTask(row.model.taskId)
@@ -285,17 +327,25 @@ Rectangle {
             }
         }
 
-        // Estado vacio
+        // Estado vacio (icono con pulso suave)
         Column {
             anchors.centerIn: parent
             visible: list.count === 0
             spacing: 10
 
             Text {
+                id: emptyIcon
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "📥"
                 font.pixelSize: 42
                 color: Theme.subtleText
+                opacity: 0.6
+                SequentialAnimation on opacity {
+                    running: list.count === 0
+                    loops: Animation.Infinite
+                    NumberAnimation { from: 0.45; to: 0.9; duration: 1400; easing.type: Style.easeInOut }
+                    NumberAnimation { from: 0.9; to: 0.45; duration: 1400; easing.type: Style.easeInOut }
+                }
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
@@ -332,6 +382,15 @@ Rectangle {
         width: 440
         padding: Style.paddingLarge
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Style.animNormal; easing.type: Style.easeOut }
+            NumberAnimation { property: "scale"; from: 0.94; to: 1; duration: Style.animNormal; easing.type: Style.easeOut }
+        }
+        exit: Transition {
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Style.animFast; easing.type: Style.easeInOut }
+        }
+
         background: Rectangle {
             color: Theme.surface
             radius: Style.radius
@@ -387,6 +446,9 @@ Rectangle {
                     Layout.preferredHeight: 34
                     radius: Style.radiusSmall
                     color: deleteRowMouse.containsMouse ? "#c93b2f" : Theme.danger
+                    scale: deleteRowMouse.pressed ? 0.96 : 1.0
+                    Behavior on color { ColorAnimation { duration: Style.animFast } }
+                    Behavior on scale { NumberAnimation { duration: Style.animFast } }
                     property int cancelRowWidth: 110
                     Text {
                         anchors.centerIn: parent

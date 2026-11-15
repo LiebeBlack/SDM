@@ -19,6 +19,17 @@ ApplicationWindow {
 
     property var selectedTaskId: 0
 
+    // Fondo con degradado sutil (solo cuando Mica esta activo no pinta).
+    Rectangle {
+        anchors.fill: parent
+        visible: !bridge.micaEnabled
+        z: -1
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: Theme.bgGradientStart }
+            GradientStop { position: 1.0; color: Theme.bgGradientEnd }
+        }
+    }
+
     // Sincronizacion del tema con los ajustes de la aplicación.
     Connections {
         target: bridge
@@ -120,7 +131,7 @@ ApplicationWindow {
         // --------------------------------------------------------------
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 28
+            Layout.preferredHeight: 30
             color: Theme.surfaceAlt
             border.color: Theme.border
 
@@ -148,14 +159,14 @@ ApplicationWindow {
                 Text {
                     text: "▼ " + bridge.globalSpeedText
                     font.pixelSize: Style.fontSizeSmall
-                    font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+                    font.family: Style.fontMono
                     color: Theme.success
                 }
-                Text {
-                    text: "RAM: " + bridge.memoryMb.toFixed(1) + " MB"
-                    font.pixelSize: Style.fontSizeSmall
-                    font.family: "Consolas, 'DejaVu Sans Mono', monospace"
-                    color: Theme.subtleText
+
+                // Grafico de velocidad en vivo (muestreo 1 s, 90 puntos).
+                SpeedGraph {
+                    Layout.preferredWidth: 150
+                    Layout.preferredHeight: 20
                 }
 
                 Item { Layout.fillWidth: true }
@@ -166,6 +177,12 @@ ApplicationWindow {
                           : "🌐 Extensión no vinculada (Ajustes → Conexión)"
                     font.pixelSize: Style.fontSizeSmall
                     color: bridge.connectedClients > 0 ? Theme.success : Theme.subtleText
+                }
+                Text {
+                    text: "RAM: " + bridge.memoryMb.toFixed(1) + " MB"
+                    font.pixelSize: Style.fontSizeSmall
+                    font.family: Style.fontMono
+                    color: Theme.subtleText
                 }
                 Text {
                     text: "v" + appVersion
@@ -207,6 +224,15 @@ ApplicationWindow {
         padding: Style.paddingLarge
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
+        // Entrada/salida animada (fade + escala).
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Style.animNormal; easing.type: Style.easeOut }
+            NumberAnimation { property: "scale"; from: 0.94; to: 1; duration: Style.animNormal; easing.type: Style.easeOut }
+        }
+        exit: Transition {
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Style.animFast; easing.type: Style.easeInOut }
+        }
+
         title: "Seleccionar calidad"
         titleItem.color: Theme.text
         titleItem.font.pixelSize: Style.fontSizeTitle
@@ -245,7 +271,10 @@ ApplicationWindow {
                     Layout.preferredHeight: 46
                     radius: Style.radiusSmall
                     color: variantMouse.containsMouse ? Theme.hover : Theme.bg
-                    border.color: Theme.border
+                    border.color: variantMouse.containsMouse ? Theme.accent : Theme.border
+                    scale: variantMouse.containsMouse ? 1.01 : 1.0
+                    Behavior on color { ColorAnimation { duration: Style.animFast } }
+                    Behavior on scale { NumberAnimation { duration: Style.animFast; easing.type: Style.easeOut } }
 
                     RowLayout {
                         anchors.fill: parent
@@ -311,7 +340,7 @@ ApplicationWindow {
     }
 
     // --------------------------------------------------------------
-    // Avisos flotantes (toasts)
+    // Avisos flotantes (toasts animados: slide + fade)
     // --------------------------------------------------------------
     Rectangle {
         id: toast
@@ -319,9 +348,11 @@ ApplicationWindow {
         property int level: 0
 
         function show(text, lvl) {
+            animOut.stop()
             message = text
             level = lvl
             visible = true
+            animIn.restart()
             hideTimer.restart()
         }
 
@@ -329,38 +360,76 @@ ApplicationWindow {
         anchors.top: parent.top
         anchors.margins: 18
         z: 200
-        width: Math.min(460, toastText.implicitWidth + 32)
-        height: toastText.implicitHeight + 20
+        width: Math.min(460, toastText.implicitWidth + 64)
+        height: Math.max(40, toastText.implicitHeight + 22)
         radius: Style.radius
         color: level === 2 ? Theme.danger : (level === 1 ? Theme.warning : Theme.surface)
-        border.color: Theme.border
-        opacity: 0.97
+        border.color: level === 2 ? Theme.danger : Theme.border
+        opacity: 0
         visible: false
 
-        Behavior on opacity { NumberAnimation { duration: 150 } }
+        // Icono por nivel.
+        Text {
+            id: toastIcon
+            anchors.left: parent.left
+            anchors.leftMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            text: toast.level === 2 ? "✕" : (toast.level === 1 ? "⚠" : "✓")
+            font.pixelSize: 15
+            font.weight: Font.Bold
+            color: toast.level >= 1 ? "#ffffff" : Theme.accent
+        }
 
         Text {
             id: toastText
-            anchors.centerIn: parent
-            width: parent.width - 28
+            anchors.left: toastIcon.right
+            anchors.leftMargin: 10
+            anchors.right: parent.right
+            anchors.rightMargin: 14
+            anchors.verticalCenter: parent.verticalCenter
             text: toast.message
             font.pixelSize: Style.fontSize
             color: toast.level >= 1 ? "#ffffff" : Theme.text
             wrapMode: Text.Wrap
         }
 
+        // Sombra del toast.
+        Rectangle {
+            anchors.fill: parent
+            anchors.topMargin: 3
+            anchors.bottomMargin: -3
+            radius: parent.radius
+            color: Theme.shadow
+            opacity: 0.4
+            z: -1
+        }
+
+        // Animacion de entrada: deslizamiento lateral + fade.
+        ParallelAnimation {
+            id: animIn
+            NumberAnimation { target: toast; property: "opacity"; from: 0; to: 0.98; duration: Style.animToast; easing.type: Style.easeOut }
+            NumberAnimation { target: toast; property: "anchors.rightMargin"; from: -40; to: 18; duration: Style.animToast; easing.type: Style.easeOut }
+        }
+
+        // Animacion de salida: fade.
+        ParallelAnimation {
+            id: animOut
+            NumberAnimation { target: toast; property: "opacity"; to: 0; duration: Style.animNormal; easing.type: Style.easeInOut }
+            onStopped: toast.visible = false
+        }
+
         MouseArea {
             anchors.fill: parent
             onClicked: {
                 hideTimer.stop()
-                toast.visible = false
+                animOut.restart()
             }
         }
 
         Timer {
             id: hideTimer
             interval: 4500
-            onTriggered: toast.visible = false
+            onTriggered: animOut.restart()
         }
     }
 }

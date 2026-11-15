@@ -83,6 +83,12 @@ struct Transaction {
     sqlite3* m_db;
 };
 
+/// Versión del esquema de base de datos (PRAGMA user_version).
+/// Cualquier cambio de tablas/columnas debe añadir un paso en migrateSchema()
+/// e incrementar este valor. Nunca se rebaja: una base de una versión más
+/// reciente que el programa se rechaza con error claro.
+constexpr int kSchemaVersion = 1;
+
 const char* kSchemaSql = R"SQL(
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
@@ -233,6 +239,40 @@ bool DatabaseManager::createSchema(QString* error) {
             return false;
         }
     }
+    return migrateSchema(error);
+}
+
+bool DatabaseManager::migrateSchema(QString* error) {
+    // Lectura de la versión actual del esquema.
+    int version = 0;
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, "PRAGMA user_version;", -1, &stmt, nullptr) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            version = sqlite3_column_int(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    if (version > kSchemaVersion) {
+        return fail(QStringLiteral("La base de datos usa el esquema v%1 y este programa solo "
+                                   "soporta hasta v%2. Actualice SDM o use una copia de la base.")
+                        .arg(version)
+                        .arg(kSchemaVersion),
+                    error);
+    }
+    if (version == kSchemaVersion) {
+        return true;
+    }
+
+    // --- Migraciones incrementales (versión -> versión + 1) ---------------
+    // v0 -> v1: esquema inicial (CREATE TABLE IF NOT EXISTS ya ejecutado).
+    // if (version < 2) { ... ALTER/CREATE adicionales ... }
+
+    const QString pragma = QStringLiteral("PRAGMA user_version = %1;").arg(kSchemaVersion);
+    if (!exec(pragma.toUtf8().constData(), error)) {
+        return false;
+    }
+    log::info("Esquema de base de datos migrado a v{}", kSchemaVersion);
     return true;
 }
 
@@ -247,6 +287,22 @@ void DatabaseManager::close() {
 
 bool DatabaseManager::isOpen() const {
     return m_db != nullptr;
+}
+
+int DatabaseManager::schemaVersion() const {
+    if (m_db == nullptr) {
+        return 0;
+    }
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, "PRAGMA user_version;", -1, &stmt, nullptr) != SQLITE_OK) {
+        return 0;
+    }
+    int version = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        version = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return version;
 }
 
 // ---------------------------------------------------------------------------

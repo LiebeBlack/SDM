@@ -12,6 +12,7 @@
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QQmlApplicationEngine>
@@ -19,6 +20,7 @@
 #include <QQuickWindow>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QSurfaceFormat>
 #include <QTimer>
 #include <QUrl>
 
@@ -56,6 +58,13 @@ QString singleInstanceName() {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    // Formato de superficie: MSAA 4x + stencil para render Fluent suave
+    // (bordes redondeados y sombras por capas sin aliasing).
+    QSurfaceFormat format = QSurfaceFormat::defaultFormat();
+    format.setSamples(4);
+    format.setStencilBufferSize(8);
+    QSurfaceFormat::setDefaultFormat(format);
+
     // Nombres de organizacion/aplicacion: determinan rutas de QSettings y
     // QStandardPaths (tambien los usa SDMNativeHost).
     QCoreApplication::setOrganizationName(QStringLiteral("SDM"));
@@ -65,6 +74,7 @@ int main(int argc, char* argv[]) {
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationDisplayName(QStringLiteral("S-Download Manager"));
     QGuiApplication::setDesktopFileName(QStringLiteral("sdm"));
+    app.setWindowIcon(QIcon(QStringLiteral(":/assets/icon.svg")));
 
     // --- CLI -------------------------------------------------------------
     QCommandLineParser parser;

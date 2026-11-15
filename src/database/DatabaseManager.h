@@ -37,6 +37,9 @@ public:
     /// Ruta de la base abierta.
     QString path() const { return m_path; }
 
+    /// Versión del esquema leída de PRAGMA user_version (0 si no hay base).
+    int schemaVersion() const;
+
     // --- Descargas -------------------------------------------------------
     quint64 insertTask(const DownloadTask& task, QString* error = nullptr);
     bool updateTask(const DownloadTask& task, QString* error = nullptr);
@@ -63,6 +66,7 @@ private:
     bool exec(const char* sql, QString* error = nullptr);
     bool fail(const QString& message, QString* error = nullptr);
     bool createSchema(QString* error);
+    bool migrateSchema(QString* error);
 
     sqlite3* m_db = nullptr;
     QString m_path;

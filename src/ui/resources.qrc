@@ -10,10 +10,12 @@
 
         <!-- Componentes -->
         <file alias="qml/components/SdmToolButton.qml">qml/components/SdmToolButton.qml</file>
+        <file alias="qml/components/SdmCard.qml">qml/components/SdmCard.qml</file>
         <file alias="qml/components/TopToolbar.qml">qml/components/TopToolbar.qml</file>
         <file alias="qml/components/Sidebar.qml">qml/components/Sidebar.qml</file>
         <file alias="qml/components/DownloadTable.qml">qml/components/DownloadTable.qml</file>
         <file alias="qml/components/SegmentBar.qml">qml/components/SegmentBar.qml</file>
+        <file alias="qml/components/SpeedGraph.qml">qml/components/SpeedGraph.qml</file>
         <file alias="qml/components/NewTaskModal.qml">qml/components/NewTaskModal.qml</file>
         <file alias="qml/components/SettingsDialog.qml">qml/components/SettingsDialog.qml</file>
 

@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.25)
 #  Objetivos:
 #    SDM            -> Aplicacion de escritorio (Qt 6 QML + motor de descargas)
 #    SDMNativeHost  -> Puente Native Messaging (STDIN/STDOUT <-> WebSocket local)
-#    sdm_tests      -> Pruebas unitarias (CTest)
+#    sdm_test_*     -> Pruebas unitarias (CTest: tests/test_*.cpp)
 # ============================================================================
 
 project(SDM
@@ -142,10 +142,12 @@ set(SDM_UI_QML_FILES
     src/ui/qml/theme/Theme.qml
     src/ui/qml/theme/Style.qml
     src/ui/qml/components/SdmToolButton.qml
+    src/ui/qml/components/SdmCard.qml
     src/ui/qml/components/TopToolbar.qml
     src/ui/qml/components/Sidebar.qml
     src/ui/qml/components/DownloadTable.qml
     src/ui/qml/components/SegmentBar.qml
+    src/ui/qml/components/SpeedGraph.qml
     src/ui/qml/components/NewTaskModal.qml
     src/ui/qml/components/SettingsDialog.qml
 )
@@ -232,9 +234,12 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # ---------------------------------------------------------------------------
-# 7. Pruebas unitarias
+# 7. Pruebas unitarias (CTest)
 # ---------------------------------------------------------------------------
-# (tests directory does not exist - see CI configuration)
+if(SDM_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 # ---------------------------------------------------------------------------
 # 8. Instalacion

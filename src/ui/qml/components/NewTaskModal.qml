@@ -110,6 +110,15 @@ Dialog {
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
+    // Entrada/salida animada (fade + escala) coherente con el resto de diálogos.
+    enter: Transition {
+        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Style.animNormal; easing.type: Style.easeOut }
+        NumberAnimation { property: "scale"; from: 0.94; to: 1; duration: Style.animNormal; easing.type: Style.easeOut }
+    }
+    exit: Transition {
+        NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Style.animFast; easing.type: Style.easeInOut }
+    }
+
     title: streamMode ? "Nueva descarga multimedia" : "Nueva descarga"
     titleItem.color: Theme.text
     titleItem.font.pixelSize: Style.fontSizeTitle

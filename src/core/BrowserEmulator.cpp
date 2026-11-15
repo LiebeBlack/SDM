@@ -281,9 +281,10 @@ void BrowserEmulator::applyCommonOptions(CURL* easy, const DownloadTask& task, c
     curl_easy_setopt(easy, CURLOPT_LOW_SPEED_LIMIT, 1024L);
     curl_easy_setopt(easy, CURLOPT_LOW_SPEED_TIME, 60L);
 
-    // Compresione(s) aceptadas como peticion explicita (algunos servidores
-    // responden 415 si no llega la cabecera): pedimos identity.
-    // (Aplicada via slist en SegmentWorker; aqui queda el fallback.)
+    // Codificacion de contenido: "identity" (sin compresion) para preservar
+    // los offsets byte a byte. Algunos servidores responden 415 si no llega
+    // la cabecera, por eso se envia explicitamente.
+    // (SegmentWorker la refuerza via slist; aqui queda el comun.)
 
     // Proxy opcional (Ajustes -> Red).
     if (!proxy.isEmpty()) {

@@ -3,7 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme"
 
-// Barra de herramientas principal (spec 4.1).
+// Barra de herramientas principal (spec 4.1): marca con degradado,
+// acciones con tooltips y busqueda en tiempo real.
 Rectangle {
     id: toolbar
 
@@ -15,8 +16,20 @@ Rectangle {
 
     height: Style.toolbarHeight
     color: Theme.surface
-    border.color: Theme.border
-    border.width: 0
+
+    // Borde inferior con degradado de marca.
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 2
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0.0; color: Theme.gradientStart }
+            GradientStop { position: 0.5; color: Theme.border }
+            GradientStop { position: 1.0; color: Theme.border }
+        }
+    }
 
     // Boton con tooltip reutilizable.
     component ToolAction: SdmToolButton {
@@ -32,14 +45,26 @@ Rectangle {
         anchors.rightMargin: Style.padding
         spacing: Style.spacing
 
-        // Marca
+        // Marca (icono en chip con degradado)
         Row {
-            spacing: 8
-            Text {
-                text: "⬇"
-                font.pixelSize: 20
-                color: Theme.accent
+            spacing: 10
+
+            Rectangle {
+                width: 32
+                height: 32
+                radius: Style.radiusSmall
                 anchors.verticalCenter: parent.verticalCenter
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: Theme.gradientStart }
+                    GradientStop { position: 1.0; color: Theme.gradientEnd }
+                }
+                Text {
+                    anchors.centerIn: parent
+                    text: "⬇"
+                    font.pixelSize: 17
+                    color: "#ffffff"
+                }
             }
             Text {
                 text: "SDM"
@@ -83,7 +108,7 @@ Rectangle {
         ToolAction {
             glyph: "🧹"
             label: "Limpiar"
-            tip: "Quitar de la lista las descargas completadas"
+            tip: "Quitar de la lista las descargas completadas (Ctrl+Delete)"
             onClicked: toolbar.clearCompletedRequested()
         }
         ToolAction {
@@ -95,34 +120,47 @@ Rectangle {
 
         Item { Layout.fillWidth: true }
 
-        // Busqueda en tiempo real
-        Rectangle {
-            Layout.preferredWidth: 240
+        // Busqueda en tiempo real (animacion de ancho sin tocar propiedades
+        // Layout.*, que Qt Quick Layouts no permite animar).
+        Item {
+            Layout.preferredWidth: 280
             Layout.preferredHeight: 32
-            radius: Style.radiusSmall
-            color: Theme.bg
-            border.color: searchField.activeFocus ? Theme.accent : Theme.border
-            border.width: 1
 
-            Text {
-                anchors.left: parent.left
-                anchors.leftMargin: 10
+            Rectangle {
+                id: searchBox
+                anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                text: "🔍"
-                font.pixelSize: 13
-                color: Theme.subtleText
-            }
-            TextField {
-                id: searchField
-                anchors.fill: parent
-                anchors.leftMargin: 30
-                anchors.rightMargin: 8
-                background: Item {}
-                placeholderText: "Buscar…"
-                placeholderTextColor: Theme.subtleText
-                color: Theme.text
-                font.pixelSize: Style.fontSize
-                onTextChanged: tasksModel.setSearchText(text)
+                width: searchField.activeFocus ? 280 : 240
+                height: 32
+                radius: Style.radiusSmall
+                color: Theme.bg
+                border.color: searchField.activeFocus ? Theme.accent : Theme.border
+                border.width: searchField.activeFocus ? 1.5 : 1
+
+                Behavior on width { NumberAnimation { duration: Style.animNormal; easing.type: Style.easeOut } }
+                Behavior on border.color { ColorAnimation { duration: Style.animFast } }
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "🔍"
+                    font.pixelSize: 13
+                    color: searchField.activeFocus ? Theme.accent : Theme.subtleText
+                    Behavior on color { ColorAnimation { duration: Style.animFast } }
+                }
+                TextField {
+                    id: searchField
+                    anchors.fill: parent
+                    anchors.leftMargin: 30
+                    anchors.rightMargin: 8
+                    background: Item {}
+                    placeholderText: "Buscar…"
+                    placeholderTextColor: Theme.subtleText
+                    color: Theme.text
+                    font.pixelSize: Style.fontSize
+                    onTextChanged: tasksModel.setSearchText(text)
+                }
             }
         }
 
@@ -130,7 +168,7 @@ Rectangle {
         Text {
             text: bridge.globalSpeedText
             font.pixelSize: Style.fontSize
-            font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+            font.family: Style.fontMono
             color: Theme.success
         }
     }

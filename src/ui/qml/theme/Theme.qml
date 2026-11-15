@@ -2,6 +2,7 @@ pragma Singleton
 import QtQuick
 
 // Paleta Fluent (oscura por defecto, respetando el tema del sistema).
+// Incluye gradientes, elevación y colores semánticos completos.
 QtObject {
     id: theme
 
@@ -18,6 +19,12 @@ QtObject {
     readonly property color pressed: dark ? "#4a4a4a" : "#dcdcdc"
     readonly property color selection: dark ? "#2f4f70" : "#d3e6f8"
 
+    // --- Degradados de marca (toolbar, botones acento, barras) ---
+    readonly property color gradientStart: dark ? "#3b9dff" : "#2b7fd4"
+    readonly property color gradientEnd: dark ? "#2b7fd4" : "#1e6bb8"
+    readonly property color bgGradientStart: dark ? "#232323" : "#f7f7f7"
+    readonly property color bgGradientEnd: dark ? "#1b1b1b" : "#ebebeb"
+
     // --- Texto ---
     readonly property color text: dark ? "#f5f5f5" : "#1c1c1c"
     readonly property color subtleText: dark ? "#a3a3a3" : "#5f5f5f"
@@ -27,14 +34,18 @@ QtObject {
     readonly property color accent: "#3b9dff"
     readonly property color accentDeep: "#2b7fd4"
     readonly property color success: "#2ecc71"
+    readonly property color successSoft: dark ? "#1e3a28" : "#dff5e7"
     readonly property color warning: "#e0b13a"
+    readonly property color warningSoft: dark ? "#3a3220" : "#fdf3d7"
     readonly property color danger: "#e74c3c"
+    readonly property color dangerSoft: dark ? "#3a2220" : "#fbe3e0"
     readonly property color info: "#8e7cff"
     readonly property color queued: "#9aa0a6"
     readonly property color expired: "#ff7b3d"
 
     // --- Overlay / sombras ---
     readonly property color overlay: dark ? "#99000000" : "#80000000"
+    readonly property color shadow: dark ? "#66000000" : "#26000000"
     readonly property color progressTrack: dark ? "#404040" : "#dcdcdc"
     readonly property color progressFill: accent
 
