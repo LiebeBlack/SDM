@@ -369,8 +369,8 @@ void SegmentWorker::start() {
                           static_cast<int>(SegmentResult::Failed), status, lastError);
             return;
         }
-        const int shift = std::min(attempt, 4);
-        const int backoffMs = std::min(8000, 500 * (1 << shift));
+        const int shift = (std::min)(attempt, 4);
+        const int backoffMs = (std::min)(8000, 500 * (1 << shift));
         const int jitter = QRandomGenerator::global()->bounded(250);
         log::debug("SegmentWorker {} reintento {}/{} en {} ms ({})", log::utf8(tag), attempt,
                    m_request.maxRetries, backoffMs + jitter, log::utf8(lastError));

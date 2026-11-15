@@ -25,7 +25,8 @@ estar ✅ antes de publicar una versión estable.
 
 ## 3. Seguridad
 
-- [ ] Token del puente WebSocket: ≥16 bytes aleatorios (CSPRNG), solo `127.0.0.1`, validado en cada mensaje
+- [x] Token del puente WebSocket: ≥16 bytes aleatorios (CSPRNG), solo `127.0.0.1`, validado en cada mensaje, comparación en tiempo constante
+- [x] Contrapresión del puente: frames ≤ 1 MiB, handshake con timeout de 5 s y tope de conexiones sin autenticar
 - [ ] `com.sdm.bridge` / `com.sdm.nativehost`: `allowed_origins` con ID de extensión real (nunca placeholder en instalador)
 - [ ] Sin ejecución de binarios de rutas de usuario en `ffmpegPath`/`ytDlpPath` sin confirmación
 - [ ] Validación de URL (solo http/https/ftp) y sanitización de nombres de archivo (traversal `../`, caracteres reservados Windows)

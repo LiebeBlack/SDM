@@ -37,7 +37,12 @@
 #include <thread>
 
 #ifdef _WIN32
-#  define WIN32_LEAN_AND_MEAN
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
 #  include <fcntl.h>
 #  include <io.h>
 #  include <windows.h>
@@ -301,7 +306,7 @@ void NativeMessagingHost::scheduleReconnect() {
     }
     m_reconnectTimer->start(m_reconnectDelayMs);
     // Backoff exponencial con tope: 1 s, 2 s, 4 s ... hasta 30 s.
-    m_reconnectDelayMs = std::min(m_reconnectDelayMs * 2, kReconnectMaxMs);
+    m_reconnectDelayMs = (std::min)(m_reconnectDelayMs * 2, kReconnectMaxMs);
 }
 
 void NativeMessagingHost::onTextMessage(const QString& message) {

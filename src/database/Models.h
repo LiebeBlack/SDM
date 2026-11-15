@@ -261,7 +261,9 @@ inline QList<SegmentInfo> splitRangeIntoSegments(qint64 total, int threads) {
     int usable = threads;
     if (total < kMinSegmentBytes * threads) {
         usable = static_cast<int>(std::max<qint64>(1, total / kMinSegmentBytes));
-        usable = std::max(usable, 1);
+        // Parentesis en `(std::max)`: windows.h define las macros min/max y
+        // rompen la llamada cualificada en MSVC.
+        usable = (std::max)(usable, 1);
         if (total < kMinSegmentBytes) {
             usable = 1;
         }
@@ -291,7 +293,8 @@ inline QList<SegmentInfo> splitRangeIntoSegments(qint64 total, int threads) {
 
 /// Extension minuscula sin punto ("" si no hay extension).
 inline QString lowerExtension(const QString& fileName) {
-    const int slash = static_cast<int>(std::max(fileName.lastIndexOf(QLatin1Char('/')), fileName.lastIndexOf(QLatin1Char('\\'))));
+    const int slash = static_cast<int>((std::max)(fileName.lastIndexOf(QLatin1Char('/')),
+                                                 fileName.lastIndexOf(QLatin1Char('\\'))));
     const QString base = fileName.mid(slash + 1);
     const int dot = static_cast<int>(base.lastIndexOf(QLatin1Char('.')));
     if (dot <= 0 || dot == base.size() - 1) {

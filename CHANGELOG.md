@@ -58,15 +58,27 @@ Primera versión de producción del gestor de descargas S-Download Manager (SDM)
   se genera con rutas absolutas del usuario.
 - Sanitización de nombres de archivo (traversal, caracteres ilegales,
   truncado seguro conservando extensión).
+- Puente WebSocket endurecido: frames limitados a 1 MiB
+  (`setMaxAllowedIncomingMessageSize`), handshake con timeout de 5 s y tope de
+  16 conexiones pendientes de autenticar para no agotar memoria ni el puerto.
 
 ### Corregido
 - Error de compilación en `SegmentWorker::writeThunk`: el callback estático de
   libcurl accedía a miembros de instancia sin `self->` (protección por rango
   y sniffing anti-HTML).
+- `QJsonDocument::toObject()` inexistente en el handshake WebSocket (la API es
+  `object()`): ningún cliente podía autenticarse por el mensaje `hello`.
+- Macros `min`/`max` de `windows.h` rompían `std::max(...)` en `Models.h`:
+  llamadas parentizadas `(std::max)` y `NOMINMAX`/`WIN32_LEAN_AND_MEAN`
+  definidos globalmente en MSVC.
+- Desplazamientos de 32 bits en el cálculo de backoff (`1 << shift`) que MSVC
+  estrechaban a 64 bits (C4334): ahora `qint64(1) << shift`.
 - Todos los warnings de conversión `qsizetype` → `int` (`-Wconversion`) en
   `Models.h`, `BrowserEmulator.cpp`, `DownloadEngine.cpp`, `StreamDownloader.cpp`,
   `DatabaseManager.cpp`, `WebSocketServer.cpp` y `GuiManager.cpp`; constantes de
   User-Agent sin uso reutilizadas para construir el pool de rotación.
+- Estándar C++ declarado a CMake (`CMAKE_CXX_STANDARD`): Qt6 imponía
+  `cxx_std_17` y generaba un `-std` redundante (D9025 en MSVC).
 - Diálogos que no se abrían por usar la propiedad inexistente `Dialog.titleItem`
   y el tipo inexistente `TimeEdit` de Qt Widgets en QML; sustituidos por
   cabeceras propias y un selector HH:MM sobre `SpinBox`.

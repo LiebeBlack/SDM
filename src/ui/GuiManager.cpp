@@ -249,12 +249,12 @@ void TaskListModel::onTaskAdded(quint64 id) {
         reload();
         return;
     }
-    m_cacheIndex.insert(id, m_cache.size());
+    m_cacheIndex.insert(id, static_cast<int>(m_cache.size()));
     m_cache.append(task);
     if (matches(task)) {
         const int newRow = static_cast<int>(m_visible.size());
         beginInsertRows(QModelIndex(), newRow, newRow);
-        m_visible.append(m_cache.size() - 1);
+        m_visible.append(static_cast<int>(m_cache.size() - 1));
         endInsertRows();
     } else {
         refilter();
@@ -413,7 +413,7 @@ int TaskListModel::rowForTask(quint64 id) const {
     if (cacheIndex < 0) {
         return -1;
     }
-    return m_visible.indexOf(cacheIndex);
+    return static_cast<int>(m_visible.indexOf(cacheIndex));
 }
 
 void TaskListModel::pauseAt(int row) {

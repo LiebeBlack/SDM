@@ -12,6 +12,8 @@
 #include <cerrno>
 #include <cstring>
 
+#include <algorithm>
+
 #ifdef Q_OS_WIN
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
@@ -343,7 +345,7 @@ bool FileAllocator::zeroRange(qint64 offset, qint64 len, QString* error) {
     const QByteArray zeros(static_cast<qsizetype>(kBlock), '\0');
     qint64 written = 0;
     while (written < len) {
-        const qint64 chunk = std::min(kBlock, len - written);
+        const qint64 chunk = (std::min)(kBlock, len - written);
         const qint64 n = writeAt(offset + written, zeros.constData(), chunk);
         if (n < 0) {
             return setError(error, QStringLiteral("Fallo al rellenar con ceros en %1").arg(offset + written));

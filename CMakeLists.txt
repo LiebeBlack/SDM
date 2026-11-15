@@ -65,6 +65,16 @@ else()
 endif()
 message(STATUS "SDM: usando estandar C++${SDM_CXX_STANDARD}")
 
+# CMake solo conoce CXX_STANDARD hasta 23 (26 exige CMake 3.30). Se declara el
+# requisito para que CMake deje de imponer el cxx_std_17 de Qt6 y emitir un
+# -std redundante (D9025 en MSVC); el dialecto exacto ya lo fija
+# add_compile_options arriba.
+if(SDM_CXX_STANDARD GREATER 23)
+    set(CMAKE_CXX_STANDARD 23)
+else()
+    set(CMAKE_CXX_STANDARD ${SDM_CXX_STANDARD})
+endif()
+
 # ---------------------------------------------------------------------------
 # 2. Opciones de compilacion
 # ---------------------------------------------------------------------------
@@ -74,7 +84,11 @@ option(SDM_WARNINGS_AS_ERRORS "Tratar advertencias como errores"            OFF)
 option(SDM_ENABLE_SANITIZERS  "Habilitar Address/UB Sanitizers (GCC/Clang)"  OFF)
 
 if(MSVC)
+    # NOMINMAX: evita que <windows.h> defina las macros min/max y rompa
+    # `std::min` / `std::max` en cabeceras compartidas.
+    # WIN32_LEAN_AND_MEAN: menos contaminacion del espacio global.
     add_compile_options(/W4 /utf-8 /Zc:__cplusplus /Zc:preprocessor /EHsc)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
     if(SDM_WARNINGS_AS_ERRORS)
         add_compile_options(/WX)
     endif()

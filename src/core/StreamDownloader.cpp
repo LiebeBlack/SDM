@@ -51,7 +51,7 @@ QHash<QString, QString> parseAttrList(const QString& text) {
             i = end < 0 ? n : end + 1;
         } else {
             const qsizetype comma = text.indexOf(QLatin1Char(','), i);
-            const int end = comma < 0 ? n : comma;
+            const qsizetype end = comma < 0 ? n : comma;
             value = text.mid(i, end - i).trimmed();
             i = end;
         }

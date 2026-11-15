@@ -500,7 +500,7 @@ void DownloadEngine::appendRestored(const DownloadTask& task) {
     }
     m_index.insert(copy.id, m_tasks.size());
     m_tasks.push_back(copy);
-    m_nextId = std::max(m_nextId, copy.id + 1);
+    m_nextId = (std::max)(m_nextId, copy.id + 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -692,7 +692,7 @@ quint64 DownloadEngine::addTask(const NewTaskRequest& request) {
     if (task.id == 0) {
         task.id = m_nextId++; // modo memoria (sin base de datos)
     } else {
-        m_nextId = std::max(m_nextId, task.id + 1);
+        m_nextId = (std::max)(m_nextId, task.id + 1);
     }
 
     appendRestored(task);
@@ -1155,8 +1155,8 @@ void DownloadEngine::onProbeResult(quint64 taskId, const ProbeResult& result) {
             failTask(taskId, QStringLiteral("No se pudo conectar: %1").arg(result.error));
             return;
         }
-        const int shift = std::min(task->retries, 5);
-        const qint64 backoff = std::min<qint64>(30000, qint64(1000) * (1 << shift));
+        const int shift = (std::min)(task->retries, 5);
+        const qint64 backoff = std::min<qint64>(30000, qint64(1000) * (qint64(1) << shift));
         runtime->retryAtMs = nowMs() + backoff;
         task->state = DownloadState::Queued;
         persistProgress(taskId);
@@ -1562,8 +1562,8 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
                 return;
             }
             if (task->retries <= m_settings.maxRetries) {
-                const int shift = std::min(task->retries, 5);
-                const qint64 backoff = std::min<qint64>(30000, qint64(1000) * (1 << shift));
+                const int shift = (std::min)(task->retries, 5);
+                const qint64 backoff = std::min<qint64>(30000, qint64(1000) * (qint64(1) << shift));
                 runtime->retryAtMs = nowMs() + backoff;
                 persistProgress(taskId);
                 emit taskUpdated(taskId);
@@ -1619,7 +1619,7 @@ void DownloadEngine::applyDegrade(quint64 id) {
     linear.index = 0;
     linear.startByte = 0;
     linear.endByte = task->totalBytes > 0 ? task->totalBytes - 1 : -1;
-    linear.receivedBytes = task->totalBytes > 0 ? std::min(receivedNow, task->totalBytes) : 0;
+    linear.receivedBytes = task->totalBytes > 0 ? (std::min)(receivedNow, task->totalBytes) : 0;
     linear.state = SegmentState::Pending;
     task->segments = {linear};
     task->receivedBytes = linear.receivedBytes;
@@ -1725,7 +1725,7 @@ void DownloadEngine::performRebalance(quint64 id, int index, qint64 received) {
     SegmentInfo second;
     second.index = 0;
     for (const SegmentInfo& existing : task->segments) {
-        second.index = std::max(second.index, existing.index + 1);
+        second.index = (std::max)(second.index, existing.index + 1);
     }
     second.startByte = midpoint + 1;
     second.endByte = originalEnd;
@@ -2261,7 +2261,7 @@ void DownloadEngine::onStreamProbeFinished(bool ok, const QVariantList& variants
     if (runtime->variantTimer == nullptr) {
         runtime->variantTimer = new QTimer(this);
         runtime->variantTimer->setSingleShot(true);
-        runtime->variantTimer->setInterval(std::max(5, m_settings.streamChoiceTimeoutSec) * 1000);
+        runtime->variantTimer->setInterval((std::max)(5, m_settings.streamChoiceTimeoutSec) * 1000);
         connect(runtime->variantTimer, &QTimer::timeout, this, [this, id]() {
             Runtime* rt = runtimeFor(id, false);
             if (rt != nullptr && rt->pendingVariant < 0 && rt->streamActive) {

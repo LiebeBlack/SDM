@@ -23,6 +23,18 @@
 
 namespace sdm {
 
+namespace {
+
+// Limites del canal local: un cliente hostil (o un fallo de la extension) no
+// puede agotar memoria con frames gigantes ni bloquear el puerto con
+// conexiones a medio autenticar.
+constexpr qint64 kMaxWsMessageBytes = 1 << 20; // 1 MiB por frame
+constexpr int kMaxPendingSockets = 16;         // conexiones sin token a la vez
+constexpr int kHandshakeTimeoutMs = 5000;
+constexpr int kAuthWindowMs = 5000;
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // BridgeInfo / autenticacion
 // ---------------------------------------------------------------------------
@@ -156,6 +168,8 @@ bool WebSocketServer::listen(quint16 preferredPort, const QString& token, QStrin
     close();
 
     m_server = new QWebSocketServer(QStringLiteral("S-Download Manager"), QWebSocketServer::NonSecureMode, this);
+    m_server->setMaxAllowedIncomingMessageSize(kMaxWsMessageBytes);
+    m_server->setHandshakeTimeout(kHandshakeTimeoutMs);
 
     bool bound = false;
     if (preferredPort > 0) {
@@ -272,6 +286,18 @@ void WebSocketServer::onNewConnection() {
             continue;
         }
 
+        // 1b) Contrapresion: tope de conexiones pendientes de autenticar.
+        if (m_pending.size() >= kMaxPendingSockets) {
+            log::warn("Puente WS rechazado: demasiados clientes sin autenticar ({})",
+                      static_cast<int>(m_pending.size()));
+            closeSocket(socket, static_cast<int>(QWebSocketProtocol::CloseCodeGoingAway),
+                        QStringLiteral("demasiadas conexiones pendientes"));
+            socket->deleteLater();
+            continue;
+        }
+
+        socket->setMaxAllowedIncomingMessageSize(kMaxWsMessageBytes);
+
         // 2) Token via query string (?token=...).
         const QUrlQuery query(socket->requestUrl().query());
         const QString queryToken = query.queryItemValue(QStringLiteral("token"));
@@ -296,8 +322,9 @@ void WebSocketServer::onNewConnection() {
                         return;
                     }
                     // Cliente pendiente: primer mensaje = {"type":"hello","token":...}
+                    // QJsonDocument expone object() (toObject() es de QJsonValue).
                     const QString helloToken =
-                        QJsonDocument::fromJson(raw).toObject().value(QStringLiteral("token")).toString();
+                        QJsonDocument::fromJson(raw).object().value(QStringLiteral("token")).toString();
                     if (!helloToken.isEmpty() && auth::verifyToken(m_token, helloToken)) {
                         m_pending.remove(socket);
                         m_clients.insert(socket);
@@ -318,7 +345,7 @@ void WebSocketServer::onNewConnection() {
         } else {
             m_pending.insert(socket);
             // Ventana de 5 s para autenticarse.
-            QTimer::singleShot(5000, socket, [this, socket]() {
+            QTimer::singleShot(kAuthWindowMs, socket, [this, socket]() {
                 if (m_pending.remove(socket)) {
                     log::warn("Puente WS: cliente sin autenticar, desconectado");
                     closeSocket(socket, static_cast<int>(QWebSocketProtocol::CloseCodePolicyViolated),
