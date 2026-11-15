@@ -44,6 +44,8 @@ struct EngineSettings {
     bool preallocateFiles = true;               // Reserva de espacio en disco
     bool useYtDlp = false;                      // Usar yt-dlp para streams complejos
     QString proxy;                              // Vacío = conexión directa
+    int connectTimeoutSec = 20;
+    int totalTimeoutSec = 3600;
     QString ffmpegPath = QStringLiteral("ffmpeg");
     QString ytDlpPath = QStringLiteral("yt-dlp");
     int maxRetries = kDefaultMaxRetries;
@@ -146,6 +148,7 @@ private:
         bool refreshStopping = false;   // parada asociada a un 403
         bool removePending = false;     // borrar la tarea al detenerse
         bool removeDeleteFile = false;  // borrar tambien los ficheros
+        bool deleteFilesOnFailure = false; // limpiar temporales si falla
         bool degradePending = false;    // degradar a 1 hilo al detenerse
         bool rangeSupported = true;     // false -> el servidor ignora Range
         qint64 retryAtMs = 0;           // backoff antes de reintentar la sonda

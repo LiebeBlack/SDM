@@ -74,6 +74,7 @@ signals:
 private:
     void onNewConnection();
     void closeSocket(QWebSocket* socket, int code, const QString& reason);
+    void rejectOversizedMessage(QWebSocket* socket, qint64 bytes);
     void dropClient(QWebSocket* socket);
 
     QWebSocketServer* m_server = nullptr;

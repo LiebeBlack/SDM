@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -65,6 +66,9 @@ constexpr int kReconnectMaxMs = 30000;                // Backoff maximo
 constexpr int kStdinPollMs = 200;                     // Granularidad de salida del lector
 
 std::atomic<bool> g_running{true};
+#ifdef _WIN32
+std::atomic<HANDLE> g_stdinHandle{nullptr};
+#endif
 
 /// Escribe un frame nativo: longitud uint32 LE + carga util.
 /// Solo se invoca desde el hilo escritor (serializacion garantizada).
@@ -87,11 +91,14 @@ bool writeFrame(const QByteArray& payload) {
 ///   1 = hay datos, 0 = timeout (revisar g_running), -1 = canal cerrado.
 int waitStdin(int timeoutMs) {
 #ifdef _WIN32
-    const HANDLE handle = GetStdHandle(STD_INPUT_HANDLE);
+    const HANDLE handle = g_stdinHandle.load(std::memory_order_relaxed);
     if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
         return -1;
     }
     for (int waited = 0; waited < timeoutMs; waited += 25) {
+        if (!g_running.load(std::memory_order_relaxed)) {
+            return 0;
+        }
         DWORD available = 0;
         if (!PeekNamedPipe(handle, nullptr, 0, nullptr, &available, nullptr)) {
             return -1; // pipe roto: el navegador cerro el canal
@@ -103,11 +110,15 @@ int waitStdin(int timeoutMs) {
     }
     return 0;
 #else
+    if (!g_running.load(std::memory_order_relaxed)) {
+        return 0;
+    }
+    const int boundedTimeout = std::max(0, std::min(timeoutMs, 200));
     struct pollfd descriptor;
     descriptor.fd = STDIN_FILENO;
     descriptor.events = POLLIN;
     descriptor.revents = 0;
-    const int rc = poll(&descriptor, 1, timeoutMs);
+    const int rc = poll(&descriptor, 1, boundedTimeout);
     if (rc < 0) {
         return (errno == EINTR) ? 0 : -1;
     }
@@ -123,7 +134,7 @@ int waitStdin(int timeoutMs) {
 bool readStdinChunk(std::string* buffer) {
     char chunk[65536];
 #ifdef _WIN32
-    const HANDLE handle = GetStdHandle(STD_INPUT_HANDLE);
+    const HANDLE handle = g_stdinHandle.load(std::memory_order_relaxed);
     if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
         return false;
     }
@@ -149,6 +160,10 @@ bool readStdinChunk(std::string* buffer) {
     }
     const size_t got = static_cast<size_t>(gotRaw);
 #endif
+    if (static_cast<size_t>(got) > static_cast<size_t>(kMaxNativeMessage) + 4u -
+                                       std::min(buffer->size(), static_cast<size_t>(kMaxNativeMessage) + 4u)) {
+        return false; // buffer síncrono limitado a un frame y cabecera
+    }
     buffer->append(chunk, got);
     return true;
 }
@@ -210,9 +225,8 @@ NativeMessagingHost::~NativeMessagingHost() {
         const bool finished =
             m_writer->cv.wait_for(lock, std::chrono::seconds(2), [this]() { return m_writer->finished; });
         if (!finished) {
-            // El navegador tiene STDIO bloqueado: el hilo solo toca WriterState
-            // y STDOUT, asi que desacoplarlo es seguro (el proceso recupera
-            // ambos descriptores al terminar).
+            // El hilo conserva shared_ptr a WriterState y solo accede al stream
+            // del proceso; se desacopla si el navegador dejó bloqueada la tubería.
             m_writerThread.detach();
             return;
         }
@@ -223,6 +237,8 @@ NativeMessagingHost::~NativeMessagingHost() {
 }
 
 bool NativeMessagingHost::start(const QString& bridgeInfoPath, QString* error) {
+    g_running.store(true, std::memory_order_relaxed);
+    m_exiting = false;
     QFile infoFile(bridgeInfoPath);
     if (!infoFile.open(QIODevice::ReadOnly)) {
         if (error != nullptr) {
@@ -240,9 +256,16 @@ bool NativeMessagingHost::start(const QString& bridgeInfoPath, QString* error) {
         return false;
     }
     const QJsonObject object = doc.object();
-    m_port = static_cast<quint16>(object.value(QStringLiteral("port")).toInt(9010));
+    const int configuredPort = object.value(QStringLiteral("port")).toInt(0);
     m_token = object.value(QStringLiteral("token")).toString();
-    if (m_token.isEmpty()) {
+    if (configuredPort <= 0 || configuredPort > 65535) {
+        if (error != nullptr) {
+            *error = QStringLiteral("bridge.json contiene un puerto inválido");
+        }
+        return false;
+    }
+    m_port = static_cast<quint16>(configuredPort);
+    if (m_token.size() < 32 || m_token.size() > 256) {
         if (error != nullptr) {
             *error = QStringLiteral("bridge.json sin token");
         }
@@ -250,6 +273,7 @@ bool NativeMessagingHost::start(const QString& bridgeInfoPath, QString* error) {
     }
 
     m_socket = new QWebSocket(QStringLiteral("SDM Native Host"), QWebSocket::Client, this);
+    m_socket->setMaxAllowedIncomingFrameSize(1024 * 1024);
     connect(m_socket, &QWebSocket::connected, this, &NativeMessagingHost::onConnected);
     connect(m_socket, &QWebSocket::disconnected, this, &NativeMessagingHost::onDisconnected);
     connect(m_socket, &QWebSocket::textMessageReceived, this, &NativeMessagingHost::onTextMessage);
@@ -287,10 +311,18 @@ void NativeMessagingHost::tryConnect() {
 
 void NativeMessagingHost::onConnected() {
     m_wsConnected = true;
+    QJsonObject payload;
+    payload.insert(QStringLiteral("token"), m_token);
+    QJsonObject hello;
+    hello.insert(QStringLiteral("type"), QStringLiteral("hello"));
+    hello.insert(QStringLiteral("payload"), payload);
+    const QByteArray greeting = QJsonDocument(hello).toJson(QJsonDocument::Compact);
+    if (m_socket != nullptr) {
+        m_socket->sendTextMessage(QString::fromUtf8(greeting));
+    }
     m_reconnectDelayMs = kReconnectInitialMs; // backoff listo para la proxima caida
     m_reconnectTimer->stop();
-    // Entrega diferida: las peticiones acumuladas durante la caida de SDM.
-    flushPendingToSdm();
+    // El saludo autentica primero; flushPendingToSdm se hará tras helloAck.
 }
 
 void NativeMessagingHost::onDisconnected() {
@@ -310,15 +342,41 @@ void NativeMessagingHost::scheduleReconnect() {
 }
 
 void NativeMessagingHost::onTextMessage(const QString& message) {
-    sendToBrowser(message.toUtf8());
+    if (message.size() > 1024 * 1024) {
+        std::fprintf(stderr, "SDMNativeHost: mensaje WebSocket supera el límite, desconectando\n");
+        if (m_socket != nullptr) {
+            m_socket->abort();
+        }
+        return;
+    }
+    const QByteArray raw = message.toUtf8();
+    const QJsonDocument document = QJsonDocument::fromJson(raw);
+    if (!document.isObject()) {
+        return;
+    }
+    const QString type = document.object().value(QStringLiteral("type")).toString();
+    if (type == QLatin1String("error") && m_pendingToSdm.isEmpty() && m_wsConnected) {
+        // Error previo al saludo aceptado: el token/compatibilidad no coincide.
+        if (m_socket != nullptr) {
+            m_socket->abort();
+        }
+        return;
+    }
+    if (type == QLatin1String("helloAck")) {
+        flushPendingToSdm();
+        sendToBrowser(raw);
+        return;
+    }
+    sendToBrowser(raw);
 }
 
 void NativeMessagingHost::sendToBrowser(const QByteArray& jsonPayload) {
     if (jsonPayload.isEmpty()) {
         return;
     }
-    if (jsonPayload.size() > static_cast<qsizetype>(kMaxNativeMessage)) {
-        std::fprintf(stderr, "SDMNativeHost: mensaje hacia el navegador excede 1 MB, descartado\n");
+    if (jsonPayload.size() > static_cast<qsizetype>(kMaxNativeMessage) ||
+        !QJsonDocument::fromJson(jsonPayload).isObject()) {
+        std::fprintf(stderr, "SDMNativeHost: mensaje hacia el navegador inválido o demasiado grande, descartado\n");
         return;
     }
     {
@@ -329,8 +387,13 @@ void NativeMessagingHost::sendToBrowser(const QByteArray& jsonPayload) {
         // Contrapresion: si el navegador no consume, se descartan los frames
         // mas antiguos (notificaciones de estado) y se contabilizan.
         while (!m_writer->queue.isEmpty() && m_writer->bytes + jsonPayload.size() > kMaxOutboxBytes) {
-            m_writer->bytes -= m_writer->queue.takeFirst().size();
+            const QByteArray dropped = m_writer->queue.takeFirst();
+            m_writer->bytes -= dropped.size();
             ++m_writer->dropped;
+        }
+        if (m_writer->bytes + jsonPayload.size() > kMaxOutboxBytes) {
+            ++m_writer->dropped;
+            return;
         }
         if (m_writer->dropped > 0 && m_writer->dropped % 100 == 1) {
             std::fprintf(stderr, "SDMNativeHost: cola STDOUT saturada, %d frames descartados\n",
@@ -346,7 +409,27 @@ void NativeMessagingHost::forwardToSdm(const QByteArray& jsonPayload) {
     if (jsonPayload.isEmpty()) {
         return;
     }
+    const QJsonDocument document = QJsonDocument::fromJson(jsonPayload);
+    if (!document.isObject()) {
+        std::fprintf(stderr, "SDMNativeHost: JSON inválido desde el navegador, descartado\n");
+        return;
+    }
+    if (jsonPayload.size() > static_cast<qsizetype>(kMaxNativeMessage)) {
+        std::fprintf(stderr, "SDMNativeHost: petición hacia SDM excede 1 MB, descartada\n");
+        return;
+    }
     if (m_wsConnected && m_socket != nullptr) {
+        if (m_socket->bytesToWrite() + jsonPayload.size() > kMaxPendingToSdmBytes) {
+            if (m_pendingToSdm.size() < kMaxPendingToSdm &&
+                m_pendingToSdmBytes + jsonPayload.size() <= kMaxPendingToSdmBytes) {
+                m_pendingToSdm.append(jsonPayload);
+                m_pendingToSdmBytes += jsonPayload.size();
+            }
+            m_socket->abort();
+            onDisconnected();
+            std::fprintf(stderr, "SDMNativeHost: cola WebSocket saturada, reintento programado\n");
+            return;
+        }
         m_socket->sendTextMessage(QString::fromUtf8(jsonPayload));
         return;
     }
@@ -365,13 +448,20 @@ void NativeMessagingHost::flushPendingToSdm() {
     if (m_socket == nullptr) {
         return;
     }
-    const QList<QByteArray> pending = m_pendingToSdm;
+    QList<QByteArray> pending = m_pendingToSdm;
     m_pendingToSdm.clear();
     m_pendingToSdmBytes = 0;
     for (const QByteArray& payload : pending) {
+        if (!m_wsConnected || m_socket->bytesToWrite() + payload.size() > kMaxPendingToSdmBytes) {
+            m_pendingToSdm.append(payload);
+            m_pendingToSdmBytes += payload.size();
+            continue;
+        }
         m_socket->sendTextMessage(QString::fromUtf8(payload));
     }
-    if (!pending.isEmpty()) {
+    if (!m_pendingToSdm.isEmpty()) {
+        scheduleReconnect();
+    } else if (!pending.isEmpty()) {
         std::fprintf(stderr, "SDMNativeHost: %d peticiones retenidas entregadas a SDM\n",
                      static_cast<int>(pending.size()));
     }
@@ -405,8 +495,10 @@ void NativeMessagingHost::pumpStdout(const std::shared_ptr<WriterState>& state) 
             break;
         }
     }
-    std::lock_guard<std::mutex> lock(state->mutex);
-    state->finished = true;
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->finished = true;
+    }
     state->cv.notify_all();
 }
 
@@ -421,9 +513,11 @@ int main(int argc, char* argv[]) {
     // Sin transformacion de texto: los frames son binarios.
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);
+    sdm::g_stdinHandle.store(GetStdHandle(STD_INPUT_HANDLE), std::memory_order_relaxed);
 #endif
 
     QCoreApplication app(argc, argv);
+    sdm::g_running.store(true, std::memory_order_relaxed);
     QCoreApplication::setOrganizationName(QStringLiteral("SDM"));
     QCoreApplication::setApplicationName(QStringLiteral("S-Download Manager"));
     QCoreApplication::setApplicationVersion(QStringLiteral("1.0.0"));
@@ -479,10 +573,13 @@ int main(int argc, char* argv[]) {
                      [&host](const QByteArray& payload) { host.forwardToSdm(payload); },
                      Qt::QueuedConnection);
 
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &host, []() {
+        sdm::g_running.store(false, std::memory_order_relaxed);
+    });
     const int exitCode = app.exec();
     sdm::g_running.store(false);
     if (reader.joinable()) {
-        reader.join(); // el lector sondea: termina en menos de kStdinPollMs
+        reader.join(); // waitStdin revisa el flag y termina en el siguiente sondeo
     }
     return exitCode;
 }

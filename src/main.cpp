@@ -162,6 +162,7 @@ int main(int argc, char* argv[]) {
     }
 
     ProtocolHandler protocol;
+    protocol.setBridgeToken(bridgeInfo.token);
     QObject::connect(&webSocket, &WebSocketServer::messageReceived, &protocol,
                      [&webSocket, &protocol](const QByteArray& raw, QObject* sender) {
                          const QByteArray response = protocol.process(raw);

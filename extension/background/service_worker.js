@@ -199,8 +199,8 @@ function connectWebSocket() {
     wsRetryDelay = WS_RECONNECT_MIN_MS;
     updateBadge();
     log("WebSocket del puente conectado");
-    // Autenticacion por hello (ademas del token en query string).
-    postRaw({ type: "hello", token: parsed.token, ref: newRef("h") });
+    // El handshake del host espera el formato comun {type, ref, payload}.
+    postRaw({ type: "hello", ref: newRef("h"), payload: { token: parsed.token } });
     flushQueue();
     startPing();
   };

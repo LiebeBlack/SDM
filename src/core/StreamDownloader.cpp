@@ -23,11 +23,19 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace sdm {
 
 namespace {
+
+constexpr qsizetype kMaxManifestBytes = 8 * 1024 * 1024;
+constexpr qsizetype kMaxManifestLines = 100000;
+constexpr qsizetype kMaxStreamSegments = 100000;
+constexpr qsizetype kMaxDashVariants = 512;
+constexpr qsizetype kMaxDashSegmentsPerTrack = 100000;
+constexpr qint64 kMaxStreamSegmentBytes = 512LL * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Helpers de parseo
@@ -72,7 +80,11 @@ double parseIsoDuration(const QString& text) {
     auto it = re.globalMatch(text);
     while (it.hasNext()) {
         const QRegularExpressionMatch match = it.next();
-        const double value = match.captured(1).toDouble();
+        bool valueOk = false;
+        const double value = match.captured(1).toDouble(&valueOk);
+        if (!valueOk || !std::isfinite(value) || value < 0.0) {
+            return 0.0;
+        }
         const QChar unit = match.captured(2).at(0).toLower();
         if (unit == QLatin1Char('h')) {
             seconds += value * 3600.0;
@@ -111,7 +123,7 @@ QString applyDashTemplate(QString text, const QString& repId, qint64 bandwidth, 
         if (!widthText.isEmpty()) {
             bool okWidth = false;
             const int width = widthText.toInt(&okWidth);
-            if (okWidth && width > value.size()) {
+            if (okWidth && width > value.size() && width <= 32) {
                 value = value.rightJustified(width, QLatin1Char('0'));
             }
         }
@@ -142,8 +154,15 @@ size_t memoryWriteThunk(char* ptr, size_t size, size_t nmemb, void* userdata) {
     if (sink->abortFlag != nullptr && sink->abortFlag->load(std::memory_order_relaxed)) {
         return 0;
     }
+    if (nmemb != 0 && size > std::numeric_limits<size_t>::max() / nmemb) {
+        sink->tooLarge = true;
+        return 0;
+    }
     const size_t total = size * nmemb;
-    if (sink->maxBytes > 0 && sink->data->size() + static_cast<qint64>(total) > sink->maxBytes) {
+    if (sink->data->size() < 0 ||
+        (sink->maxBytes > 0 && (sink->data->size() > sink->maxBytes ||
+                                total > static_cast<size_t>(sink->maxBytes - sink->data->size()))) ||
+        total > static_cast<size_t>(std::numeric_limits<qsizetype>::max() - sink->data->size())) {
         sink->tooLarge = true;
         return 0; // corta: el recurso es demasiado grande para ser un manifiesto
     }
@@ -159,6 +178,10 @@ struct FileSink {
 };
 
 size_t fileWriteThunk(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    if (nmemb != 0 && size > std::numeric_limits<size_t>::max() / nmemb) {
+        return 0;
+    }
+    const size_t total = size * nmemb;
     auto* sink = static_cast<FileSink*>(userdata);
     if (sink == nullptr) {
         return 0;
@@ -166,7 +189,11 @@ size_t fileWriteThunk(char* ptr, size_t size, size_t nmemb, void* userdata) {
     if (sink->abortFlag != nullptr && sink->abortFlag->load(std::memory_order_relaxed)) {
         return 0;
     }
-    const size_t total = size * nmemb;
+    if (sink->written > kMaxStreamSegmentBytes ||
+        total > static_cast<size_t>(kMaxStreamSegmentBytes - sink->written)) {
+        sink->failed = true;
+        return 0;
+    }
     const qint64 written = sink->file.write(ptr, static_cast<qint64>(total));
     if (written < 0) {
         sink->failed = true;
@@ -260,11 +287,14 @@ QString StreamDownloader::resolveUrl(const QString& base, const QString& relativ
 
 QList<StreamVariant> StreamDownloader::parseMasterPlaylist(const QString& text, const QString& baseUrl) {
     QList<StreamVariant> variants;
-    if (!text.startsWith(QLatin1String("#EXTM3U"))) {
+    if (text.size() > kMaxManifestBytes || !text.startsWith(QLatin1String("#EXTM3U"))) {
         return variants;
     }
 
     const QStringList lines = text.split(QLatin1Char('\n'));
+    if (lines.size() > kMaxManifestLines) {
+        return variants;
+    }
     StreamVariant pending;
     bool hasPending = false;
 
@@ -300,6 +330,9 @@ QList<StreamVariant> StreamDownloader::parseMasterPlaylist(const QString& text, 
                 variants.append(pending);
                 hasPending = false;
             }
+            if (variants.size() >= kMaxDashVariants) {
+                break;
+            }
         }
     }
 
@@ -327,8 +360,11 @@ bool StreamDownloader::parseMediaPlaylist(const QString& text, const QString& ba
         return false;
     };
 
-    if (!text.startsWith(QLatin1String("#EXTM3U"))) {
-        return fail(QStringLiteral("No es un playlist HLS válido"));
+    if (text.size() > kMaxManifestBytes || !text.startsWith(QLatin1String("#EXTM3U"))) {
+        return fail(QStringLiteral("Playlist HLS inválido o demasiado grande"));
+    }
+    if (text.count(QLatin1Char('\n')) > kMaxManifestLines) {
+        return fail(QStringLiteral("El playlist HLS supera el límite de líneas"));
     }
 
     bool endList = false;
@@ -361,7 +397,16 @@ bool StreamDownloader::parseMediaPlaylist(const QString& text, const QString& ba
         } else if (line.startsWith(QLatin1Char('#'))) {
             continue;
         } else if (segments != nullptr) {
-            segments->append(resolveUrl(baseUrl, line));
+            if (segments->size() >= kMaxStreamSegments) {
+                return fail(QStringLiteral("El playlist HLS supera el máximo de segmentos"));
+            }
+            const QString resolved = resolveUrl(baseUrl, line);
+            const QUrl segmentUrl(resolved);
+            if (!segmentUrl.isValid() ||
+                (segmentUrl.scheme() != QLatin1String("http") && segmentUrl.scheme() != QLatin1String("https"))) {
+                return fail(QStringLiteral("El playlist contiene una URL de segmento no permitida"));
+            }
+            segments->append(resolved);
             expectUri = false;
         }
         Q_UNUSED(expectUri)
@@ -393,8 +438,8 @@ QList<StreamVariant> StreamDownloader::parseDashManifest(const QString& xml, con
         return out;
     };
 
-    if (!xml.contains(QStringLiteral("<MPD"))) {
-        return fail(QStringLiteral("No es un manifiesto DASH válido"));
+    if (xml.size() > kMaxManifestBytes || !xml.contains(QStringLiteral("<MPD"))) {
+        return fail(QStringLiteral("Manifiesto DASH inválido o demasiado grande"));
     }
 
     struct Track {
@@ -419,6 +464,7 @@ QList<StreamVariant> StreamDownloader::parseDashManifest(const QString& xml, con
     };
 
     QXmlStreamReader reader(xml);
+    reader.setEntityExpansionLimit(1024);
     double periodDuration = -1.0;
     QString mpdBase = baseUrl;
     QString periodBase = baseUrl;
@@ -442,6 +488,9 @@ QList<StreamVariant> StreamDownloader::parseDashManifest(const QString& xml, con
             return true;
         }
         if (!track.segmentListUrls.isEmpty()) {
+            if (track.segmentListUrls.size() > kMaxDashSegmentsPerTrack) {
+                return false;
+            }
             track.segments = track.segmentListUrls;
             track.init = track.segmentListInit;
             return true;
@@ -458,11 +507,16 @@ QList<StreamVariant> StreamDownloader::parseDashManifest(const QString& xml, con
                 return false;
             }
             const double segmentSeconds = static_cast<double>(track.tmplDuration) / static_cast<double>(track.tmplTimescale);
-            if (segmentSeconds <= 0.0) {
+            if (!std::isfinite(segmentSeconds) || segmentSeconds <= 0.0) {
                 return false;
             }
-            const int count = static_cast<int>(std::ceil(periodDuration / segmentSeconds));
-            if (count <= 0 || count > 100000) {
+            const double countEstimate = std::ceil(periodDuration / segmentSeconds);
+            if (!std::isfinite(countEstimate) || countEstimate <= 0.0 ||
+                countEstimate > static_cast<double>(kMaxDashSegmentsPerTrack)) {
+                return false;
+            }
+            const int count = static_cast<int>(countEstimate);
+            if (count <= 0 || count > kMaxDashSegmentsPerTrack) {
                 return false;
             }
             if (!track.tmplInit.isEmpty()) {
@@ -491,7 +545,11 @@ QList<StreamVariant> StreamDownloader::parseDashManifest(const QString& xml, con
                 periodBase = mpdBase;
                 const QString durationAttr = reader.attributes().value(QLatin1String("duration")).toString();
                 if (!durationAttr.isEmpty()) {
-                    periodDuration = parseIsoDuration(durationAttr);
+                    const double parsedDuration = parseIsoDuration(durationAttr);
+                    if (!std::isfinite(parsedDuration) || parsedDuration <= 0.0) {
+                        return fail(QStringLiteral("Duración del período DASH inválida"));
+                    }
+                    periodDuration = parsedDuration;
                 }
             } else if (name == QLatin1String("AdaptationSet")) {
                 inAdaptation = true;
@@ -551,12 +609,8 @@ QList<StreamVariant> StreamDownloader::parseDashManifest(const QString& xml, con
                 Track& target = inRepresentation ? current : setTrack;
                 const QString durationAttr = reader.attributes().value(QLatin1String("duration")).toString();
                 const QString timescaleAttr = reader.attributes().value(QLatin1String("timescale")).toString();
-                if (!durationAttr.isEmpty()) {
-                    target.tmplDuration = durationAttr.toLongLong();
-                }
-                if (!timescaleAttr.isEmpty()) {
-                    target.tmplTimescale = std::max<qint64>(1, timescaleAttr.toLongLong());
-                }
+                Q_UNUSED(durationAttr)
+                Q_UNUSED(timescaleAttr)
                 target.singleFile.clear();
             } else if (name == QLatin1String("Initialization")) {
                 Track& target = inRepresentation ? current : setTrack;
@@ -574,6 +628,9 @@ QList<StreamVariant> StreamDownloader::parseDashManifest(const QString& xml, con
                 Track& target = inRepresentation ? current : setTrack;
                 const QString media = reader.attributes().value(QLatin1String("media")).toString();
                 if (!media.isEmpty()) {
+                    if (target.segmentListUrls.size() >= kMaxDashSegmentsPerTrack) {
+                        return fail(QStringLiteral("El manifiesto DASH supera el máximo de segmentos"));
+                    }
                     target.segmentListUrls.append(resolveUrl(repBase, media));
                     target.singleFile.clear();
                 }
@@ -585,13 +642,25 @@ QList<StreamVariant> StreamDownloader::parseDashManifest(const QString& xml, con
                 const QString timescaleAttr = reader.attributes().value(QLatin1String("timescale")).toString();
                 const QString startAttr = reader.attributes().value(QLatin1String("startNumber")).toString();
                 if (!durationAttr.isEmpty()) {
-                    target.tmplDuration = durationAttr.toLongLong();
+                    const qint64 value = durationAttr.toLongLong(&okDuration);
+                    if (!okDuration || value <= 0) {
+                        return fail(QStringLiteral("Duración DASH inválida"));
+                    }
+                    target.tmplDuration = value;
                 }
                 if (!timescaleAttr.isEmpty()) {
-                    target.tmplTimescale = std::max<qint64>(1, timescaleAttr.toLongLong());
+                    const qint64 value = timescaleAttr.toLongLong(&okTimescale);
+                    if (!okTimescale || value <= 0) {
+                        return fail(QStringLiteral("Timescale DASH inválido"));
+                    }
+                    target.tmplTimescale = value;
                 }
                 if (!startAttr.isEmpty()) {
-                    target.tmplStartNumber = std::max<qint64>(1, startAttr.toLongLong());
+                    const qint64 value = startAttr.toLongLong(&okStart);
+                    if (!okStart || value < 0) {
+                        return fail(QStringLiteral("Número inicial DASH inválido"));
+                    }
+                    target.tmplStartNumber = value;
                 }
                 target.singleFile.clear();
                 target.segmentListUrls.clear();
@@ -624,10 +693,12 @@ QList<StreamVariant> StreamDownloader::parseDashManifest(const QString& xml, con
         }
     }
     if (reader.hasError()) {
-        // Un XML con error estructural severo no debe producir variantes.
-        if (videoTracks.isEmpty() && audioTracks.isEmpty()) {
-            return fail(QStringLiteral("XML DASH invalido: %1").arg(reader.errorString()));
-        }
+        // Un XML malformado puede haber proporcionado una lista parcial no
+        // confiable: se rechaza el manifiesto completo.
+        return fail(QStringLiteral("XML DASH invalido: %1").arg(reader.errorString()));
+    }
+    if (videoTracks.size() + audioTracks.size() > kMaxDashVariants) {
+        return fail(QStringLiteral("El manifiesto DASH supera el máximo de variantes"));
     }
 
     // Completa el mime de pistas de audio sin atributo (caso tipico: solo codec).
@@ -667,6 +738,9 @@ QList<StreamVariant> StreamDownloader::parseDashManifest(const QString& xml, con
                 variant.audioInitSegment = bestAudio->init;
             }
             out.append(variant);
+            if (out.size() >= kMaxDashVariants) {
+                break;
+            }
         }
     } else {
         for (const Track& audio : audioTracks) {
@@ -681,6 +755,9 @@ QList<StreamVariant> StreamDownloader::parseDashManifest(const QString& xml, con
                                                 : QStringLiteral("Audio");
             variant.resolution = QStringLiteral("audio");
             out.append(variant);
+            if (out.size() >= kMaxDashVariants) {
+                break;
+            }
         }
     }
 
@@ -714,9 +791,12 @@ bool StreamDownloader::fetchToMemory(const QString& url, const QString& referer,
         *status = 0;
     }
     const QUrl parsed(url);
-    if (!parsed.isValid()) {
+    if (!parsed.isValid() ||
+        (parsed.scheme().compare(QLatin1String("http"), Qt::CaseInsensitive) != 0 &&
+         parsed.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) != 0) ||
+        parsed.host().isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("URL invalida: %1").arg(url);
+            *error = QStringLiteral("URL HTTP/HTTPS inválida");
         }
         return false;
     }
@@ -732,7 +812,10 @@ bool StreamDownloader::fetchToMemory(const QString& url, const QString& referer,
 
     MemorySink sink;
     sink.data = out;
-    sink.maxBytes = maxBytes;
+    sink.maxBytes = maxBytes > 0 ? maxBytes : kMaxManifestBytes;
+    if (error != nullptr) {
+        error->clear();
+    }
     sink.abortFlag = abortFlag;
 
     const DownloadTask task = mediaTask(url, referer, cookies);
@@ -741,8 +824,13 @@ bool StreamDownloader::fetchToMemory(const QString& url, const QString& referer,
     curl_slist* slist = BrowserEmulator::buildSlist(headers);
 
     BrowserEmulator::applyCommonOptions(easy, task, BrowserEmulator::currentProfile(), proxy);
+    curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT_MS, 10000L);
+    curl_easy_setopt(easy, CURLOPT_TIMEOUT_MS, 300000L);
     curl_easy_setopt(easy, CURLOPT_URL, urlBytes.constData());
     curl_easy_setopt(easy, CURLOPT_HTTPHEADER, slist);
+    curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 10L);
+    curl_easy_setopt(easy, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
     curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, &memoryWriteThunk);
     curl_easy_setopt(easy, CURLOPT_WRITEDATA, &sink);
     curl_easy_setopt(easy, CURLOPT_FAILONERROR, 1L);
@@ -785,9 +873,12 @@ bool StreamDownloader::fetchToFile(const QString& url, const QString& referer, c
         *outBytes = 0;
     }
     const QUrl parsed(url);
-    if (!parsed.isValid()) {
+    if (!parsed.isValid() ||
+        (parsed.scheme().compare(QLatin1String("http"), Qt::CaseInsensitive) != 0 &&
+         parsed.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) != 0) ||
+        parsed.host().isEmpty()) {
         if (error != nullptr) {
-            *error = QStringLiteral("URL invalida: %1").arg(url);
+            *error = QStringLiteral("URL HTTP/HTTPS inválida");
         }
         return false;
     }
@@ -811,6 +902,9 @@ bool StreamDownloader::fetchToFile(const QString& url, const QString& referer, c
         return false;
     }
     sink.abortFlag = abortFlag;
+    if (error != nullptr) {
+        error->clear();
+    }
 
     const DownloadTask task = mediaTask(url, referer, cookies);
     const QList<QPair<QString, QString>> headers =
@@ -818,8 +912,13 @@ bool StreamDownloader::fetchToFile(const QString& url, const QString& referer, c
     curl_slist* slist = BrowserEmulator::buildSlist(headers);
 
     BrowserEmulator::applyCommonOptions(easy, task, BrowserEmulator::currentProfile(), proxy);
+    curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT_MS, 10000L);
+    curl_easy_setopt(easy, CURLOPT_TIMEOUT_MS, 300000L);
     curl_easy_setopt(easy, CURLOPT_URL, urlBytes.constData());
     curl_easy_setopt(easy, CURLOPT_HTTPHEADER, slist);
+    curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 10L);
+    curl_easy_setopt(easy, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
     curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, &fileWriteThunk);
     curl_easy_setopt(easy, CURLOPT_WRITEDATA, &sink);
     curl_easy_setopt(easy, CURLOPT_FAILONERROR, 1L);
@@ -837,7 +936,7 @@ bool StreamDownloader::fetchToFile(const QString& url, const QString& referer, c
     }
 
     bool ok = (rc == CURLE_OK) && !sink.failed;
-    if (!ok && sink.file.exists() && sink.written == 0) {
+    if (!ok && sink.file.exists()) {
         sink.file.remove();
     }
     if (error != nullptr) {
@@ -873,6 +972,17 @@ bool StreamDownloader::runProcess(const QString& program, const QStringList& arg
         }
         return false;
     }
+    if (timeoutMs <= 0) {
+        timeoutMs = 300000;
+    }
+    if (output != nullptr) {
+        output->clear();
+    }
+    if (error != nullptr) {
+        error->clear();
+    }
+    QString stdoutBuffer;
+    QString stderrBuffer;
     QElapsedTimer timer;
     timer.start();
     while (process.state() != QProcess::NotRunning) {
@@ -884,7 +994,7 @@ bool StreamDownloader::runProcess(const QString& program, const QStringList& arg
             }
             return false;
         }
-        if (timeoutMs > 0 && timer.elapsed() > timeoutMs) {
+        if (timer.elapsed() > timeoutMs) {
             process.kill();
             process.waitForFinished(3000);
             if (error != nullptr) {
@@ -893,14 +1003,25 @@ bool StreamDownloader::runProcess(const QString& program, const QStringList& arg
             return false;
         }
         process.waitForFinished(150);
+        // Drena stdout/stderr continuamente para evitar que el pipe lleno
+        // bloquee el proceso externo y para acotar memoria.
+        const QByteArray stdoutChunk = process.readAllStandardOutput();
+        const QByteArray stderrChunk = process.readAllStandardError();
+        if (stdoutBuffer.size() < 1024 * 1024) {
+            stdoutBuffer.append(QString::fromUtf8(stdoutChunk).left(1024 * 1024 - stdoutBuffer.size()));
+        }
+        if (stderrBuffer.size() < 64 * 1024) {
+            stderrBuffer.append(QString::fromUtf8(stderrChunk).left(64 * 1024 - stderrBuffer.size()));
+        }
     }
+    stdoutBuffer.append(QString::fromUtf8(process.readAllStandardOutput()).left(1024 * 1024 - stdoutBuffer.size()));
+    stderrBuffer.append(QString::fromUtf8(process.readAllStandardError()).left(64 * 1024 - stderrBuffer.size()));
     if (output != nullptr) {
-        *output = QString::fromUtf8(process.readAllStandardOutput());
+        *output = stdoutBuffer;
     }
     if (process.exitCode() != 0) {
         if (error != nullptr) {
-            const QString stderrText = QString::fromUtf8(process.readAllStandardError()).trimmed();
-            *error = stderrText.left(400);
+            *error = stderrBuffer.trimmed().left(400);
             if (error->isEmpty()) {
                 *error = QStringLiteral("%1 terminó con código %2").arg(program).arg(process.exitCode());
             }
@@ -922,6 +1043,12 @@ bool StreamDownloader::fetchSegmentsParallel(const QStringList& urls, const QStr
                                              const QString& tempDir, const QString& prefix,
                                              QStringList* outFilePaths, QString* error) {
     const qsizetype count = urls.size();
+    if (count > kMaxStreamSegments) {
+        if (error != nullptr) {
+            *error = QStringLiteral("El manifiesto supera el máximo de segmentos permitidos");
+        }
+        return false;
+    }
     if (outFilePaths != nullptr) {
         outFilePaths->clear();
         outFilePaths->resize(count);
@@ -931,6 +1058,9 @@ bool StreamDownloader::fetchSegmentsParallel(const QStringList& urls, const QStr
             *error = QStringLiteral("No hay segmentos que descargar");
         }
         return false;
+    }
+    if (error != nullptr) {
+        error->clear();
     }
 
     std::atomic<int> nextIndex{0};
@@ -972,6 +1102,7 @@ bool StreamDownloader::fetchSegmentsParallel(const QStringList& urls, const QStr
                 }
 
                 if (!okSegment) {
+                    QFile::remove(path);
                     failed.store(true);
                     std::lock_guard<std::mutex> lock(errorMutex);
                     if (firstError.isEmpty()) {
@@ -1000,9 +1131,22 @@ bool StreamDownloader::fetchSegmentsParallel(const QStringList& urls, const QStr
         if (error != nullptr) {
             *error = QStringLiteral("abortado");
         }
+        for (const QString& path : paths) {
+            if (!path.isEmpty()) {
+                QFile::remove(path);
+            }
+        }
+        if (outFilePaths != nullptr) {
+            outFilePaths->clear();
+        }
         return false;
     }
     if (failed.load(std::memory_order_relaxed)) {
+        for (const QString& path : paths) {
+            if (!path.isEmpty()) {
+                QFile::remove(path);
+            }
+        }
         if (error != nullptr) {
             *error = firstError.isEmpty() ? QStringLiteral("Fallo descargando segmentos") : firstError;
         }
@@ -1044,17 +1188,27 @@ void StreamDownloader::runProbe(const QString& manifestUrl, const QString& refer
         const QString text = QString::fromUtf8(payload);
         if (text.startsWith(QLatin1String("#EXTM3U"))) {
             variants = parseMasterPlaylist(text, manifestUrl);
-            if (variants.isEmpty()) {
+            if (variants.isEmpty() && !text.contains(QStringLiteral("#EXTINF:"))) {
+                errorMessage = QStringLiteral("Playlist HLS maestro sin variantes descargables");
+            } else if (variants.isEmpty()) {
                 // Playlist media directo (unica calidad).
-                const bool isLive = !text.contains(QStringLiteral("#EXT-X-ENDLIST"));
-                if (isLive) {
-                    errorMessage = QStringLiteral("Transmisión en directo no soportada");
+                QStringList segments;
+                QString initSegment;
+                if (!parseMediaPlaylist(text, manifestUrl, &segments, &initSegment, &errorMessage)) {
+                    variants.clear();
                 } else {
                     StreamVariant direct;
                     direct.url = manifestUrl;
+                    direct.segments = segments;
+                    direct.initSegment = initSegment;
                     direct.label = QStringLiteral("Calidad original");
                     direct.resolution = QStringLiteral("original");
                     variants.append(direct);
+                }
+                if (!variants.isEmpty()) {
+                    errorMessage.clear();
+                } else if (errorMessage.isEmpty()) {
+                    errorMessage = QStringLiteral("Playlist HLS inválido o sin segmentos");
                 }
             }
         } else if (text.contains(QStringLiteral("<MPD"))) {
@@ -1207,15 +1361,40 @@ void StreamDownloader::runDownload(quint64 jobId, const QString& manifestUrl, in
         process.start();
         if (process.waitForStarted(5000)) {
             QString stderrBuffer;
+            QString stdoutBuffer;
+            QString pendingProgress;
+            QElapsedTimer ytTimer;
+            ytTimer.start();
             while (process.state() != QProcess::NotRunning) {
+                if (ytTimer.elapsed() > 6LL * 60 * 60 * 1000) {
+                    process.kill();
+                    process.waitForFinished(3000);
+                    finish(false, QString(), QStringLiteral("yt-dlp excedió el tiempo máximo"));
+                    return;
+                }
                 if (m_abort.load(std::memory_order_relaxed)) {
                     process.kill();
                     process.waitForFinished(3000);
                     finish(false, QString(), QStringLiteral("abortado"));
                     return;
                 }
-                if (process.waitForReadyRead(200)) {
-                    const QString chunk = QString::fromUtf8(process.readAllStandardOutput());
+                process.waitForReadyRead(200);
+                {
+                    const QByteArray stdoutChunk = process.readAllStandardOutput();
+                    const QByteArray stderrChunk = process.readAllStandardError();
+                    if (pendingProgress.size() < 4096) {
+                        pendingProgress.append(QString::fromUtf8(stdoutChunk).left(4096 - pendingProgress.size()));
+                    }
+                    if (stderrBuffer.size() < 16 * 1024) {
+                        stderrBuffer.append(QString::fromUtf8(stderrChunk).left(16 * 1024 - stderrBuffer.size()));
+                    }
+                }
+                {
+                    const qsizetype lastNewline = pendingProgress.lastIndexOf(QLatin1Char('\n'));
+                    const QString chunk = lastNewline >= 0 ? pendingProgress.left(lastNewline + 1) : QString();
+                    if (lastNewline >= 0) {
+                        pendingProgress.remove(0, lastNewline + 1);
+                    }
                     const QStringList lines = chunk.split(QLatin1Char('\n'));
                     for (const QString& line : lines) {
                         if (line.startsWith(QLatin1String("download:"))) {
@@ -1235,14 +1414,33 @@ void StreamDownloader::runDownload(quint64 jobId, const QString& manifestUrl, in
                             }
                         }
                     }
-                    stderrBuffer += QString::fromUtf8(process.readAllStandardError()).left(4000);
                 }
             }
-            if (process.exitCode() == 0 && QFileInfo::exists(baseFinal)) {
+            const QByteArray finalStderr = process.readAllStandardError();
+            if (stderrBuffer.size() < 16 * 1024) {
+                stderrBuffer += QString::fromUtf8(finalStderr).left(16 * 1024 - stderrBuffer.size());
+            }
+            if (!pendingProgress.isEmpty() && pendingProgress.size() < 4096) {
+                // Procesa la última línea aunque el proceso haya terminado sin salto final.
+                if (pendingProgress.startsWith(QLatin1String("download:"))) {
+                    const QStringList parts = pendingProgress.mid(9).split(QLatin1Char('/'));
+                    if (parts.size() == 2) {
+                        bool okDown = false;
+                        const qint64 done = parts.at(0).toLongLong(&okDown);
+                        bool okTotal = false;
+                        const qint64 total = parts.at(1).toLongLong(&okTotal);
+                        if (okDown) {
+                            emit progress(done, okTotal ? total : -1);
+                        }
+                    }
+                }
+            }
+            if (process.exitCode() == 0 && QFileInfo::exists(baseFinal) && !m_abort.load()) {
                 QFile::remove(destPartPath);
                 finish(true, baseFinal, QString());
                 return;
             }
+            QFile::remove(baseFinal);
             log::warn("yt-dlp fallo (codigo {}), usando el motor nativo: {}", process.exitCode(),
                       log::utf8(stderrBuffer.left(200)));
         } else {
@@ -1281,6 +1479,14 @@ void StreamDownloader::runDownload(quint64 jobId, const QString& manifestUrl, in
         const QString text = QString::fromUtf8(payload);
         QString parseError;
         if (text.startsWith(QLatin1String("#EXTM3U"))) {
+            QStringList directSegments;
+            QString directInit;
+            if (parseMediaPlaylist(text, mediaUrl, &directSegments, &directInit, &parseError)) {
+                videoSegments = directSegments;
+                videoInit = directInit;
+            } else {
+                parseError.clear();
+            }
             // ¿Otro nivel de maestro? (en raras CDN la variante es maestra)
             const QList<StreamVariant> nested = parseMasterPlaylist(text, mediaUrl);
             if (!nested.isEmpty()) {
@@ -1292,15 +1498,20 @@ void StreamDownloader::runDownload(quint64 jobId, const QString& manifestUrl, in
                     return;
                 }
                 const QString nestedText = QString::fromUtf8(nestedPayload);
+                videoSegments.clear();
+                videoInit.clear();
                 if (!parseMediaPlaylist(nestedText, mediaUrl, &videoSegments, &videoInit, &parseError)) {
                     finish(false, QString(), parseError);
                     return;
                 }
-            } else if (!parseMediaPlaylist(text, mediaUrl, &videoSegments, &videoInit, &parseError)) {
+            } else if (videoSegments.isEmpty() &&
+                       !parseMediaPlaylist(text, mediaUrl, &videoSegments, &videoInit, &parseError)) {
                 finish(false, QString(), parseError);
                 return;
             }
         } else if (text.contains(QStringLiteral("<MPD"))) {
+            videoSegments.clear();
+            videoInit.clear();
             const QList<StreamVariant> dash = parseDashManifest(text, mediaUrl, &parseError);
             if (dash.isEmpty()) {
                 finish(false, QString(), parseError);
@@ -1345,6 +1556,28 @@ void StreamDownloader::runDownload(quint64 jobId, const QString& manifestUrl, in
     if (!audioInit.isEmpty()) {
         audioPlan.prepend(audioInit);
     }
+    if (videoPlan.size() > kMaxStreamSegments || audioPlan.size() > kMaxStreamSegments) {
+        finish(false, QString(), QStringLiteral("El manifiesto supera el máximo de segmentos"));
+        return;
+    }
+    for (const QString& segmentUrl : videoPlan) {
+        const QUrl url(segmentUrl);
+        if (!url.isValid() || url.host().isEmpty() ||
+            (url.scheme().compare(QLatin1String("http"), Qt::CaseInsensitive) != 0 &&
+             url.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) != 0)) {
+            finish(false, QString(), QStringLiteral("URL HTTP/HTTPS inválida en el manifiesto"));
+            return;
+        }
+    }
+    for (const QString& segmentUrl : audioPlan) {
+        const QUrl url(segmentUrl);
+        if (!url.isValid() || url.host().isEmpty() ||
+            (url.scheme().compare(QLatin1String("http"), Qt::CaseInsensitive) != 0 &&
+             url.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) != 0)) {
+            finish(false, QString(), QStringLiteral("URL HTTP/HTTPS inválida en el manifiesto"));
+            return;
+        }
+    }
 
     if (!fetchSegmentsParallel(videoPlan, referer, cookies, proxy, tempDir, QStringLiteral("v"),
                                &videoFiles, &errorText)) {
@@ -1360,6 +1593,7 @@ void StreamDownloader::runDownload(quint64 jobId, const QString& manifestUrl, in
                                    &audioFiles, &errorText)) {
             QDir(tempDir).removeRecursively();
             QFile::remove(destPartPath);
+            QFile::remove(destPartPath + QStringLiteral(".audio"));
             finish(false, QString(), errorText);
             return;
         }
@@ -1380,6 +1614,11 @@ void StreamDownloader::runDownload(quint64 jobId, const QString& manifestUrl, in
             return false;
         }
         for (const QString& file : files) {
+            if (m_abort.load(std::memory_order_relaxed)) {
+                errorText = QStringLiteral("abortado");
+                out.close();
+                return false;
+            }
             QFile in(file);
             if (!in.open(QIODevice::ReadOnly)) {
                 errorText = QStringLiteral("No se pudo leer %1").arg(file);
@@ -1389,6 +1628,12 @@ void StreamDownloader::runDownload(quint64 jobId, const QString& manifestUrl, in
             char buffer[256 * 1024];
             qint64 readBytes = 0;
             while ((readBytes = in.read(buffer, sizeof(buffer))) > 0) {
+                if (m_abort.load(std::memory_order_relaxed)) {
+                    errorText = QStringLiteral("abortado");
+                    in.close();
+                    out.close();
+                    return false;
+                }
                 if (out.write(buffer, readBytes) != readBytes) {
                     errorText = QStringLiteral("Fallo de escritura en disco");
                     in.close();
@@ -1396,7 +1641,13 @@ void StreamDownloader::runDownload(quint64 jobId, const QString& manifestUrl, in
                     return false;
                 }
             }
+            const bool readFailed = in.error() != QFileDevice::NoError;
             in.close();
+            if (readFailed) {
+                errorText = QStringLiteral("Fallo de lectura en disco");
+                out.close();
+                return false;
+            }
         }
         out.close();
         return true;
@@ -1440,7 +1691,7 @@ void StreamDownloader::runDownload(quint64 jobId, const QString& manifestUrl, in
         QString ffmpegOut;
         QString ffmpegError;
         const bool muxed = runProcess(ffmpegPath.isEmpty() ? QStringLiteral("ffmpeg") : ffmpegPath, ffmpegArgs,
-                                      0, &m_abort, &ffmpegOut, &ffmpegError);
+                                      6 * 60 * 60 * 1000, &m_abort, &ffmpegOut, &ffmpegError);
         QFile::remove(destPartPath);
         QFile::remove(audioTempPath);
         if (!muxed || !QFileInfo::exists(baseFinal)) {
@@ -1485,7 +1736,7 @@ void StreamDownloader::runDownload(quint64 jobId, const QString& manifestUrl, in
             QString ffmpegOut;
             QString ffmpegError;
             const bool remuxed = runProcess(ffmpegPath.isEmpty() ? QStringLiteral("ffmpeg") : ffmpegPath,
-                                            ffmpegArgs, 0, &m_abort, &ffmpegOut, &ffmpegError);
+                                            ffmpegArgs, 6 * 60 * 60 * 1000, &m_abort, &ffmpegOut, &ffmpegError);
             if (remuxed && QFileInfo::exists(baseFinal)) {
                 QFile::remove(destPartPath);
                 finish(true, baseFinal, QString());

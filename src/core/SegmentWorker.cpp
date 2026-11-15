@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <string_view>
 
 namespace sdm {
@@ -87,16 +88,28 @@ size_t SegmentWorker::writeThunk(char* ptr, size_t size, size_t nmemb, void* use
         // escribimos nada para no corromper los offsets.
         return 0;
     }
+    if (nmemb != 0 && size > std::numeric_limits<size_t>::max() / nmemb) {
+        return 0;
+    }
     const size_t total = size * nmemb;
 
     // Capacidad restante del rango: jamas se escribe mas alla de endByte
     // (un servidor que mande de mas no puede corromper los segmentos vecinos).
     qint64 capacity = -1;
     if (self->m_request.endByte >= 0) {
-        const qint64 consumed = self->m_request.startByte +
-                                self->m_received.load(std::memory_order_relaxed) +
-                                self->m_sniffBuf.size();
-        capacity = (self->m_request.endByte + 1) - consumed;
+        const qint64 received = self->m_received.load(std::memory_order_relaxed);
+        const qint64 buffered = self->m_sniffBuf.size();
+        if (self->m_request.startByte < 0 || self->m_request.endByte < self->m_request.startByte ||
+            self->m_request.endByte == std::numeric_limits<qint64>::max()) {
+            return 0;
+        }
+        const qint64 rangeSize = self->m_request.endByte - self->m_request.startByte + 1;
+        if (received < 0 || buffered < 0 || received > rangeSize || buffered > rangeSize - received ||
+            self->m_request.startByte > std::numeric_limits<qint64>::max() - received - buffered) {
+            return 0;
+        }
+        const qint64 consumed = self->m_request.startByte + received + buffered;
+        capacity = self->m_request.endByte - consumed + 1;
         if (capacity <= 0) {
             return 0; // rango ya completo: corta la transferencia
         }
@@ -147,8 +160,11 @@ int SegmentWorker::finishSniff() {
 }
 
 size_t SegmentWorker::headerThunk(char* buffer, size_t size, size_t nitems, void* userdata) {
-    auto* self = static_cast<SegmentWorker*>(userdata);
+    if (nitems != 0 && size > std::numeric_limits<size_t>::max() / nitems) {
+        return 0;
+    }
     const size_t length = size * nitems;
+    auto* self = static_cast<SegmentWorker*>(userdata);
     if (self == nullptr || buffer == nullptr) {
         return length;
     }
@@ -200,8 +216,10 @@ bool SegmentWorker::performOnce(int* httpStatus, bool* rangeIgnored, QString* er
     m_rangeIgnored = false;
 
     const QUrl url(m_request.task.url);
-    if (!url.isValid() || url.scheme().isEmpty()) {
-        *error = QStringLiteral("URL invalida: %1").arg(m_request.task.url);
+    if (!url.isValid() || url.host().isEmpty() ||
+        (url.scheme().compare(QLatin1String("http"), Qt::CaseInsensitive) != 0 &&
+         url.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) != 0)) {
+        *error = QStringLiteral("URL HTTP/HTTPS inválida");
         return false;
     }
     QByteArray urlBytes = url.toEncoded(QUrl::FullyEncoded | QUrl::RemoveFragment);
@@ -232,6 +250,10 @@ bool SegmentWorker::performOnce(int* httpStatus, bool* rangeIgnored, QString* er
     curl_easy_setopt(easy, CURLOPT_XFERINFODATA, this);
     curl_easy_setopt(easy, CURLOPT_FAILONERROR, 1L);   // 4xx/5xx sin escribir el cuerpo de error
     curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT, static_cast<long>(m_request.connectTimeoutSec));
+    curl_easy_setopt(easy, CURLOPT_TIMEOUT, static_cast<long>(m_request.totalTimeoutSec));
+    curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 10L);
+    curl_easy_setopt(easy, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
     // Si el servidor no soporta TLS 1.2+ el handshake falla (anti downgrade).
 
     const CURLcode rc = curl_easy_perform(easy);
@@ -297,7 +319,7 @@ void SegmentWorker::start() {
 
     while (true) {
         if (m_abort.load(std::memory_order_relaxed)) {
-            emit finished(m_request.task.id, m_request.index, m_received.load(), 
+            emit finished(m_request.task.id, m_request.index, m_received.load(),
                           static_cast<int>(SegmentResult::Aborted), m_lastStatus, QString());
             return;
         }
@@ -309,7 +331,7 @@ void SegmentWorker::start() {
 
         // 1) Abort solicitado (pausa / re-segmentacion / cierre).
         if (m_abort.load(std::memory_order_relaxed)) {
-            emit finished(m_request.task.id, m_request.index, m_received.load(), 
+            emit finished(m_request.task.id, m_request.index, m_received.load(),
                           static_cast<int>(SegmentResult::Aborted), status, QString());
             return;
         }

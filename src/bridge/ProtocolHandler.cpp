@@ -4,13 +4,17 @@
 // ============================================================================
 #include "bridge/ProtocolHandler.h"
 
+#include "bridge/WebSocketServer.h"
 #include "core/DownloadEngine.h"
 #include "core/Log.h"
 
 #include <QDateTime>
+#include <QUrl>
 #include <QVariantMap>
 
 #include <nlohmann/json.hpp>
+
+#include <limits>
 
 namespace sdm {
 
@@ -96,10 +100,13 @@ int reqInt(const json& object, const char* key, int fallback) {
         return fallback;
     }
     const auto it = object.find(key);
-    if (it == object.end() || !it->is_number()) {
+    if (it == object.end() || !it->is_number_integer()) {
         return fallback;
     }
-    return it->get<int>();
+    const qint64 value = it->get<qint64>();
+    return value < std::numeric_limits<int>::min() || value > std::numeric_limits<int>::max()
+               ? fallback
+               : static_cast<int>(value);
 }
 
 qint64 reqInt64(const json& object, const char* key, qint64 fallback) {
@@ -107,10 +114,16 @@ qint64 reqInt64(const json& object, const char* key, qint64 fallback) {
         return fallback;
     }
     const auto it = object.find(key);
-    if (it == object.end() || !it->is_number()) {
+    if (it == object.end() || !it->is_number_integer()) {
         return fallback;
     }
-    return static_cast<qint64>(it->get<long long>());
+    if (it->is_number_unsigned()) {
+        const quint64 value = it->get<quint64>();
+        return value > static_cast<quint64>(std::numeric_limits<qint64>::max())
+                   ? fallback
+                   : static_cast<qint64>(value);
+    }
+    return it->get<qint64>();
 }
 
 bool reqBool(const json& object, const char* key, bool fallback) {
@@ -124,8 +137,11 @@ bool reqBool(const json& object, const char* key, bool fallback) {
     if (it->is_boolean()) {
         return it->get<bool>();
     }
-    if (it->is_number()) {
-        return it->get<long long>() != 0;
+    if (it->is_number_unsigned()) {
+        return it->get<quint64>() != 0;
+    }
+    if (it->is_number_integer()) {
+        return it->get<qint64>() != 0;
     }
     return fallback;
 }
@@ -271,6 +287,10 @@ void ProtocolHandler::onStatusChanged() {
 // ---------------------------------------------------------------------------
 
 QByteArray ProtocolHandler::process(const QByteArray& raw) {
+    constexpr qsizetype kMaxProtocolPayloadBytes = 1024 * 1024;
+    if (raw.isEmpty() || raw.size() > kMaxProtocolPayloadBytes) {
+        return errorResponse(QStringLiteral("Mensaje vacío o demasiado grande"));
+    }
     const json parsed = json::parse(raw.constData(), raw.constData() + raw.size(), nullptr, false);
     if (parsed.is_discarded() || !parsed.is_object()) {
         return errorResponse(QStringLiteral("Mensaje JSON invalido"));
@@ -281,6 +301,9 @@ QByteArray ProtocolHandler::process(const QByteArray& raw) {
                                                                                       : emptyPayload;
     const QString type = reqString(parsed, "type");
     const QString ref = reqString(parsed, "ref");
+    if (type.isEmpty() || type.size() > 64 || ref.size() > 256) {
+        return errorResponse(QStringLiteral("Tipo o referencia inválidos"));
+    }
 
     DownloadEngine& engine = DownloadEngine::instance();
     auto ack = [&](const char* replyType, json extra = json::object()) {
@@ -290,6 +313,10 @@ QByteArray ProtocolHandler::process(const QByteArray& raw) {
     };
 
     if (type == QLatin1String("hello")) {
+        const QString token = reqString(payload, "token");
+        if (token.size() < 32 || token.size() > 256 || token != m_bridgeToken) {
+            return errorResponse(QStringLiteral("Token de saludo inválido"), ref);
+        }
         json body;
         body["ok"] = true;
         body["version"] = kAppVersion;
@@ -349,12 +376,13 @@ QByteArray ProtocolHandler::process(const QByteArray& raw) {
     }
 
     if (type == QLatin1String("startStream")) {
-        NewTaskRequest probe; // solo para validar la URL aqui mismo
-        probe.url = reqString(payload, "url");
-        if (probe.url.isEmpty()) {
-            return errorResponse(QStringLiteral("Falta la URL del manifiesto"), ref);
+        const QString manifestUrl = reqString(payload, "url");
+        const QUrl parsedUrl(manifestUrl);
+        const QString scheme = parsedUrl.scheme().toLower();
+        if (!parsedUrl.isValid() || (scheme != QLatin1String("http") && scheme != QLatin1String("https"))) {
+            return errorResponse(QStringLiteral("URL HTTP/HTTPS del manifiesto no válida"), ref);
         }
-        const quint64 id = engine.addStreamTask(reqString(payload, "url"), reqString(payload, "destDir"),
+        const quint64 id = engine.addStreamTask(manifestUrl, reqString(payload, "destDir"),
                                                 reqString(payload, "referer"), reqString(payload, "cookies"),
                                                 reqString(payload, "fileName"));
         if (id == 0) {

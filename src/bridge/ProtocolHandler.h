@@ -22,6 +22,8 @@ class ProtocolHandler : public QObject {
 public:
     explicit ProtocolHandler(QObject* parent = nullptr);
 
+    void setBridgeToken(const QString& token) { m_bridgeToken = token; }
+
     /// Procesa un mensaje JSON entrante y devuelve la respuesta ("" si la
     /// respuesta la emite el motor de forma asincrona).
     QByteArray process(const QByteArray& raw);
@@ -51,6 +53,7 @@ private:
 
     QElapsedTimer m_progressThrottle;
     QElapsedTimer m_statusThrottle;
+    QString m_bridgeToken;
 };
 
 } // namespace sdm

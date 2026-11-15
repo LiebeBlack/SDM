@@ -44,6 +44,7 @@ struct SegmentRequest {
     QString proxy;             // Proxy HTTP(S) opcional (vacio = directo)
     int maxRetries = 3;        // Reintentos por fallo transitorio
     int connectTimeoutSec = 20;
+    int totalTimeoutSec = 3600;
 
     /// Tamano total del rango (-1 si es abierto).
     qint64 rangeSize() const {

@@ -28,7 +28,8 @@ namespace {
 // Limites del canal local: un cliente hostil (o un fallo de la extension) no
 // puede agotar memoria con frames gigantes ni bloquear el puerto con
 // conexiones a medio autenticar.
-constexpr qint64 kMaxWsMessageBytes = 1 << 20; // 1 MiB por frame
+constexpr quint64 kMaxWsFrameBytes = 1ULL << 20; // 1 MiB por frame
+constexpr quint64 kMaxWsMessageBytes = 1ULL << 20; // 1 MiB por mensaje completo
 constexpr int kMaxPendingSockets = 16;         // conexiones sin token a la vez
 constexpr int kHandshakeTimeoutMs = 5000;
 constexpr int kAuthWindowMs = 5000;
@@ -164,11 +165,16 @@ WebSocketServer::~WebSocketServer() {
 }
 
 bool WebSocketServer::listen(quint16 preferredPort, const QString& token, QString* error) {
+    if (token.size() < 32 || token.size() > 256) {
+        if (error != nullptr) {
+            *error = QStringLiteral("El token del puente no cumple el tamaño requerido");
+        }
+        return false;
+    }
     m_token = token;
     close();
 
     m_server = new QWebSocketServer(QStringLiteral("S-Download Manager"), QWebSocketServer::NonSecureMode, this);
-    m_server->setMaxAllowedIncomingMessageSize(kMaxWsMessageBytes);
     m_server->setHandshakeTimeout(kHandshakeTimeoutMs);
 
     bool bound = false;
@@ -234,14 +240,22 @@ int WebSocketServer::clientCount() const {
 }
 
 void WebSocketServer::broadcast(const QByteArray& payload) {
-    if (m_clients.isEmpty() || payload.isEmpty()) {
+    if (m_clients.isEmpty() || payload.isEmpty() || payload.size() > 1024 * 1024) {
         return;
     }
     const QString text = QString::fromUtf8(payload);
     for (QWebSocket* client : std::as_const(m_clients)) {
-        if (client != nullptr && client->isValid()) {
-            client->sendTextMessage(text);
+        if (client == nullptr || !client->isValid()) {
+            continue;
         }
+        if (client->bytesToWrite() + payload.size() > 4 * 1024 * 1024) {
+            log::warn("Puente WS: se cierra cliente con cola saliente saturada");
+            dropClient(client);
+            closeSocket(client, static_cast<int>(QWebSocketProtocol::CloseCodeGoingAway),
+                        QStringLiteral("cliente lento"));
+            continue;
+        }
+        client->sendTextMessage(text);
     }
 }
 
@@ -250,9 +264,16 @@ void WebSocketServer::sendTo(QObject* sender, const QByteArray& payload) {
     if (socket == nullptr || payload.isEmpty()) {
         return;
     }
-    if (socket->isValid()) {
-        socket->sendTextMessage(QString::fromUtf8(payload));
+    if (!socket->isValid() || payload.size() > 1024 * 1024) {
+        return;
     }
+    if (socket->bytesToWrite() + payload.size() > 4 * 1024 * 1024) {
+        dropClient(socket);
+        closeSocket(socket, static_cast<int>(QWebSocketProtocol::CloseCodeGoingAway),
+                    QStringLiteral("cliente lento"));
+        return;
+    }
+    socket->sendTextMessage(QString::fromUtf8(payload));
 }
 
 void WebSocketServer::closeSocket(QWebSocket* socket, int code, const QString& reason) {
@@ -260,6 +281,16 @@ void WebSocketServer::closeSocket(QWebSocket* socket, int code, const QString& r
         return;
     }
     socket->close(static_cast<QWebSocketProtocol::CloseCode>(code), reason);
+}
+
+void WebSocketServer::rejectOversizedMessage(QWebSocket* socket, qint64 bytes) {
+    if (socket == nullptr) {
+        return;
+    }
+    log::warn("Puente WS: mensaje entrante demasiado grande ({} bytes)", static_cast<long long>(bytes));
+    dropClient(socket);
+    closeSocket(socket, static_cast<int>(QWebSocketProtocol::CloseCodeTooMuchData),
+                QStringLiteral("mensaje demasiado grande"));
 }
 
 void WebSocketServer::dropClient(QWebSocket* socket) {
@@ -286,8 +317,11 @@ void WebSocketServer::onNewConnection() {
             continue;
         }
 
-        // 1b) Contrapresion: tope de conexiones pendientes de autenticar.
-        if (m_pending.size() >= kMaxPendingSockets) {
+        const QUrlQuery query(socket->requestUrl().query());
+        const QString queryToken = query.queryItemValue(QStringLiteral("token"));
+        const bool authenticated = !queryToken.isEmpty() && auth::verifyToken(m_token, queryToken);
+        // 1b) Contrapresion: el tope solo aplica a clientes que requieren hello.
+        if (!authenticated && m_pending.size() >= kMaxPendingSockets) {
             log::warn("Puente WS rechazado: demasiados clientes sin autenticar ({})",
                       static_cast<int>(m_pending.size()));
             closeSocket(socket, static_cast<int>(QWebSocketProtocol::CloseCodeGoingAway),
@@ -296,16 +330,28 @@ void WebSocketServer::onNewConnection() {
             continue;
         }
 
-        socket->setMaxAllowedIncomingMessageSize(kMaxWsMessageBytes);
+        socket->setMaxAllowedIncomingFrameSize(kMaxWsFrameBytes);
+        connect(socket, &QWebSocket::textFrameReceived, this,
+                [this, socket](const QString& frame, bool finalFrame) {
+                    const qint64 frameBytes = frame.size() * static_cast<qint64>(sizeof(QChar));
+                    if (frameBytes > static_cast<qint64>(kMaxWsFrameBytes)) {
+                        rejectOversizedMessage(socket, frameBytes);
+                        return;
+                    }
+                    const qint64 accumulated = socket->property("sdm.messageBytes").toLongLong();
+                    if (frameBytes > static_cast<qint64>(kMaxWsMessageBytes) - accumulated) {
+                        rejectOversizedMessage(socket, accumulated + frameBytes);
+                        return;
+                    }
+                    if (finalFrame) {
+                        socket->setProperty("sdm.messageBytes", 0);
+                    } else {
+                        socket->setProperty("sdm.messageBytes", accumulated + frameBytes);
+                    }
+                });
 
-        // 2) Token via query string (?token=...).
-        const QUrlQuery query(socket->requestUrl().query());
-        const QString queryToken = query.queryItemValue(QStringLiteral("token"));
-        bool authenticated = false;
-        if (!queryToken.isEmpty()) {
-            authenticated = auth::verifyToken(m_token, queryToken);
-        }
-
+        // 2) Los clientes con token en query conservan compatibilidad, pero el
+        // primer mensaje debe incluir igualmente un hello firmado en payload.
         // 3) Desconexion al conectarse.
         connect(socket, &QWebSocket::disconnected, this, [this, socket]() {
             const bool wasClient = m_clients.contains(socket);
@@ -316,15 +362,21 @@ void WebSocketServer::onNewConnection() {
 
         connect(socket, &QWebSocket::textMessageReceived, this,
                 [this, socket](const QString& message) {
+                    if (message.size() > static_cast<qsizetype>(kMaxWsMessageBytes / sizeof(QChar))) {
+                        rejectOversizedMessage(socket, static_cast<qint64>(message.size()) * sizeof(QChar));
+                        return;
+                    }
                     const QByteArray raw = message.toUtf8();
                     if (m_clients.contains(socket)) {
                         emit messageReceived(raw, socket);
                         return;
                     }
-                    // Cliente pendiente: primer mensaje = {"type":"hello","token":...}
-                    // QJsonDocument expone object() (toObject() es de QJsonValue).
+                    // Cliente pendiente: el protocolo lleva el token en payload.
+                    const QJsonDocument helloDocument = QJsonDocument::fromJson(raw);
+                    const QJsonObject helloObject = helloDocument.object();
                     const QString helloToken =
-                        QJsonDocument::fromJson(raw).object().value(QStringLiteral("token")).toString();
+                        helloObject.value(QStringLiteral("payload")).toObject()
+                            .value(QStringLiteral("token")).toString();
                     if (!helloToken.isEmpty() && auth::verifyToken(m_token, helloToken)) {
                         m_pending.remove(socket);
                         m_clients.insert(socket);
@@ -340,8 +392,14 @@ void WebSocketServer::onNewConnection() {
                 });
 
         if (authenticated) {
-            m_clients.insert(socket);
-            emit clientConnected();
+            m_pending.insert(socket); // espera hello firmado antes de aceptar mensajes de control
+            QTimer::singleShot(kAuthWindowMs, socket, [this, socket]() {
+                if (m_pending.remove(socket)) {
+                    log::warn("Puente WS: cliente sin saludo, desconectado");
+                    closeSocket(socket, static_cast<int>(QWebSocketProtocol::CloseCodePolicyViolated),
+                                QStringLiteral("saludo requerido"));
+                }
+            });
         } else {
             m_pending.insert(socket);
             // Ventana de 5 s para autenticarse.

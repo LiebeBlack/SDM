@@ -86,6 +86,7 @@ public:
 signals:
     void countsChanged();
 
+public:
     // --- Acciones sobre la fila seleccionada ---
     Q_INVOKABLE quint64 idAt(int row) const;
     Q_INVOKABLE int rowForTask(quint64 id) const;

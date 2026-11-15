@@ -13,10 +13,12 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QMetaObject>
 #include <QRandomGenerator>
+#include <QSet>
 #include <QRunnable>
 #include <QStandardPaths>
 #include <QThreadPool>
@@ -26,6 +28,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <limits>
 
 namespace sdm {
 
@@ -54,16 +57,18 @@ bool segmentsAreValid(const DownloadTask& task) {
         return false;
     }
     qint64 expectedStart = 0;
+    QSet<int> indices;
     for (const SegmentInfo& segment : task.segments) {
-        if (segment.startByte != expectedStart) {
+        if (segment.startByte != expectedStart || segment.index < 0 || indices.contains(segment.index)) {
             return false;
         }
-        if (segment.endByte < segment.startByte) {
+        if (segment.endByte < segment.startByte || segment.endByte == std::numeric_limits<qint64>::max()) {
             return false;
         }
         if (segment.receivedBytes < 0 || segment.receivedBytes > segment.totalBytes()) {
             return false;
         }
+        indices.insert(segment.index);
         expectedStart = segment.endByte + 1;
     }
     return expectedStart == task.totalBytes;
@@ -156,8 +161,11 @@ QString parseDispositionFilename(const QString& raw) {
 }
 
 size_t probeHeaderThunk(char* buffer, size_t size, size_t nitems, void* userdata) {
-    auto* sink = static_cast<ProbeSink*>(userdata);
+    if (nitems != 0 && size > std::numeric_limits<size_t>::max() / nitems) {
+        return 0;
+    }
     const size_t length = size * nitems;
+    auto* sink = static_cast<ProbeSink*>(userdata);
     if (sink == nullptr || buffer == nullptr) {
         return length;
     }
@@ -215,9 +223,9 @@ size_t probeHeaderThunk(char* buffer, size_t size, size_t nitems, void* userdata
             const QString totalPart = value.mid(slash + 1).trimmed();
             bool okTotal = false;
             const qint64 total = totalPart.toLongLong(&okTotal);
-            if (okTotal) {
+            if (okTotal && total >= 0) {
                 sink->rangeTotal = total;
-                sink->is206 = true;
+                sink->is206 = sink->status == 206;
             }
         }
     }
@@ -225,6 +233,9 @@ size_t probeHeaderThunk(char* buffer, size_t size, size_t nitems, void* userdata
 }
 
 size_t probeDiscardThunk(char* /*ptr*/, size_t size, size_t nmemb, void* /*userdata*/) {
+    if (nmemb != 0 && size > std::numeric_limits<size_t>::max() / nmemb) {
+        return 0;
+    }
     return size * nmemb; // acepta (y descarta) el cuerpo: solo queremos cabeceras
 }
 
@@ -238,9 +249,11 @@ bool probeOnce(const DownloadTask& task, const QString& url, bool head, bool ran
     }
 
     const QUrl parsed(url);
-    if (!parsed.isValid() || parsed.scheme().isEmpty()) {
+    if (!parsed.isValid() || parsed.host().isEmpty() ||
+        (parsed.scheme().compare(QLatin1String("http"), Qt::CaseInsensitive) != 0 &&
+         parsed.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) != 0)) {
         if (errOut != nullptr) {
-            *errOut = QStringLiteral("URL invalida: %1").arg(url);
+            *errOut = QStringLiteral("URL HTTP/HTTPS inválida");
         }
         return false;
     }
@@ -267,6 +280,8 @@ bool probeOnce(const DownloadTask& task, const QString& url, bool head, bool ran
     curl_easy_setopt(easy, CURLOPT_HEADERFUNCTION, &probeHeaderThunk);
     curl_easy_setopt(easy, CURLOPT_HEADERDATA, &sink);
     curl_easy_setopt(easy, CURLOPT_FAILONERROR, 1L);
+    curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT_MS, 10000L);
+    curl_easy_setopt(easy, CURLOPT_TIMEOUT_MS, 30000L);
     if (!head) {
         curl_easy_setopt(easy, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(4096));
     }
@@ -279,8 +294,10 @@ bool probeOnce(const DownloadTask& task, const QString& url, bool head, bool ran
         curl_easy_setopt(easy, CURLOPT_RANGE, "0-0");
     }
 
+    curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 10L);
+    curl_easy_setopt(easy, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
     const CURLcode rc = curl_easy_perform(easy);
-
     long code = 0;
     curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &code);
     if (code > 0) {
@@ -656,8 +673,9 @@ quint64 DownloadEngine::addTask(const NewTaskRequest& request) {
     }
     const QUrl parsed(url);
     const QString scheme = parsed.scheme().toLower();
-    if (!parsed.isValid() || (scheme != QLatin1String("http") && scheme != QLatin1String("https") &&
-                              scheme != QLatin1String("ftp"))) {
+    if (!parsed.isValid() || parsed.host().isEmpty() ||
+        (scheme != QLatin1String("http") && scheme != QLatin1String("https") &&
+         scheme != QLatin1String("ftp"))) {
         emit toast(QStringLiteral("URL no soportada: %1").arg(url), 2);
         return 0;
     }
@@ -683,6 +701,16 @@ quint64 DownloadEngine::addTask(const NewTaskRequest& request) {
     task.updatedAt = task.createdAt;
     task.totalBytes = -1;
     task.receivedBytes = 0;
+
+    const QUrl validatedUrl(task.url);
+    const QString scheme = validatedUrl.scheme().toLower();
+    if (!validatedUrl.isValid() || validatedUrl.host().isEmpty() ||
+        (scheme != QLatin1String("http") && scheme != QLatin1String("https") &&
+         scheme != QLatin1String("ftp")) ||
+        task.fileName.isEmpty() || task.fileName == QLatin1String(".") ||
+        task.fileName == QLatin1String("..")) {
+        return 0;
+    }
 
     QDir().mkpath(task.destDir);
 
@@ -868,6 +896,7 @@ void DownloadEngine::removeTask(quint64 id, bool deleteFile) {
         runtime->stopRequested = true;
         runtime->removePending = true;
         runtime->removeDeleteFile = deleteFile;
+        runtime->deleteFilesOnFailure = deleteFile;
         for (SegmentWorker* worker : runtime->workers) {
             if (worker != nullptr) {
                 worker->requestAbort();
@@ -977,6 +1006,19 @@ void DownloadEngine::updateTaskUrl(quint64 id, const QString& url, const QString
     if (task == nullptr || url.isEmpty()) {
         return;
     }
+    const QUrl parsed(url);
+    const QString scheme = parsed.scheme().toLower();
+    if (!parsed.isValid() || parsed.host().isEmpty() ||
+        (scheme != QLatin1String("http") && scheme != QLatin1String("https") &&
+         scheme != QLatin1String("ftp"))) {
+        emit toast(QStringLiteral("URL de refresco no válida; conserva el enlace anterior"), 2);
+        return;
+    }
+    if (task->state != DownloadState::Paused && task->state != DownloadState::Failed &&
+        task->state != DownloadState::WaitingRefresh) {
+        emit toast(QStringLiteral("Solo se puede cambiar el enlace de una tarea detenida"), 1);
+        return;
+    }
     task->url = url;
     if (!cookies.isEmpty()) {
         task->cookies = cookies;
@@ -987,6 +1029,7 @@ void DownloadEngine::updateTaskUrl(quint64 id, const QString& url, const QString
     task->probed = false; // la nueva URL debe volver a sondearse
     task->retries = 0;
     task->lastError.clear();
+    task->webpageStrikes = 0;
     task->state = DownloadState::Queued;
 
     if (m_db != nullptr && m_db->isOpen()) {
@@ -1132,7 +1175,8 @@ void DownloadEngine::onProbeResult(quint64 taskId, const ProbeResult& result) {
         runtime->probeInFlight = false;
     }
 
-    if (task->state != DownloadState::Connecting) {
+    if (task->state != DownloadState::Connecting &&
+        !(task->state == DownloadState::Queued && runtime != nullptr && runtime->retryAtMs <= nowMs())) {
         // El usuario pauso/elimino mientras se sondeaba.
         if (runtime != nullptr && runtime->workers.isEmpty()) {
             destroyRuntime(taskId);
@@ -1182,12 +1226,26 @@ void DownloadEngine::onProbeResult(quint64 taskId, const ProbeResult& result) {
 
     const ServerCapabilities& caps = result.capabilities;
 
-    // Validacion de reanudacion: ETag/Last-Modified o tamano distintos -> reinicio.
+    // Las filas de segmentos son la fuente de verdad de la reanudación. Si una
+    // base antigua carece de ellas, el tamaño del .part no permite saber qué
+    // rangos están completos (puede haber huecos); se reinicia sin reutilizar
+    // bytes potencialmente incorrectos.
+    if (task->receivedBytes > 0 && task->segments.isEmpty()) {
+        task->receivedBytes = 0;
+        QFile::remove(task->partPath());
+    }
+
     if (task->receivedBytes > 0) {
         bool mustReset = false;
-        if (!task->etag.isEmpty() && !caps.etag.isEmpty() && task->etag != caps.etag) {
+        const bool isRevalidation = task->state == DownloadState::Paused || task->state == DownloadState::Failed ||
+                                    task->state == DownloadState::Queued;
+        if (isRevalidation && !task->etag.isEmpty() && !caps.etag.isEmpty() && task->etag != caps.etag) {
             mustReset = true;
-        } else if (task->totalBytes > 0 && caps.totalSize > 0 && task->totalBytes != caps.totalSize) {
+        } else if (isRevalidation && !task->lastModified.isEmpty() && !caps.lastModified.isEmpty() &&
+                   task->lastModified != caps.lastModified) {
+            mustReset = true;
+        } else if (isRevalidation && task->totalBytes > 0 && caps.totalSize > 0 &&
+                   task->totalBytes != caps.totalSize) {
             mustReset = true;
         } else if (!QFileInfo::exists(task->partPath()) && task->totalBytes > 0) {
             mustReset = true;
@@ -1210,6 +1268,14 @@ void DownloadEngine::onProbeResult(quint64 taskId, const ProbeResult& result) {
     task->lastModified = caps.lastModified;
     task->mimeType = caps.mimeType;
     if (!caps.finalUrl.isEmpty() && caps.finalUrl != task->url) {
+        const QUrl finalUrl(caps.finalUrl);
+        const QString finalScheme = finalUrl.scheme().toLower();
+        if (!finalUrl.isValid() || finalUrl.host().isEmpty() ||
+            (finalScheme != QLatin1String("http") && finalScheme != QLatin1String("https") &&
+             finalScheme != QLatin1String("ftp"))) {
+            failTask(taskId, QStringLiteral("El servidor redirigió a una URL no permitida"));
+            return;
+        }
         task->url = caps.finalUrl;
     }
     const QString previousAutoName = fileNameFromUrl(task->url);
@@ -1235,9 +1301,9 @@ void DownloadEngine::onProbeResult(quint64 taskId, const ProbeResult& result) {
         task->threadCount = 1;
     }
 
-    // Reutiliza los segmentos existentes si siguen siendo coherentes.
     if (!segmentsAreValid(*task)) {
         task->segments.clear();
+        task->receivedBytes = 0;
         if (task->totalBytes > 0 && runtime->rangeSupported) {
             task->segments = splitRangeIntoSegments(task->totalBytes, task->threadCount);
         }
@@ -1265,7 +1331,11 @@ void DownloadEngine::beginSegments(quint64 id) {
         return;
     }
 
-    const bool resume = task->receivedBytes > 0 && QFileInfo::exists(task->partPath());
+    // La sonda ya validó ETag/tamaño. Para rangos, los bytes locales pueden
+    // estar distribuidos entre segmentos y no formar un prefijo continuo; se
+    // conserva el .part sin truncarlo y cada worker reanuda su propio rango.
+    const bool partExists = QFileInfo::exists(task->partPath());
+    const bool resume = partExists && !task->segments.isEmpty();
     if (resume == false && task->receivedBytes > 0) {
         // El .part desaparecio: reinicia contadores.
         task->receivedBytes = 0;
@@ -1282,8 +1352,21 @@ void DownloadEngine::beginSegments(quint64 id) {
     if (!runtime->io->isOpen()) {
         QString ioError;
         const qint64 size = task->totalBytes > 0 ? task->totalBytes : 0;
+        const qint64 existingSize = QFileInfo(task->partPath()).size();
+        const bool partSizeMismatch = task->totalBytes > 0 && existingSize != task->totalBytes;
+        const bool truncatePart = !resume || partSizeMismatch;
+        if (partSizeMismatch) {
+            for (SegmentInfo& segment : task->segments) {
+                segment.receivedBytes = 0;
+                segment.state = SegmentState::Pending;
+            }
+            task->receivedBytes = 0;
+            if (m_db != nullptr && m_db->isOpen()) {
+                m_db->saveSegments(id, task->segments, nullptr);
+            }
+        }
         if (!runtime->io->open(task->partPath(), size, m_settings.preallocateFiles, &ioError,
-                               /*truncate=*/!resume)) {
+                               /*truncate=*/truncatePart)) {
             failTask(id, ioError);
             return;
         }
@@ -1316,6 +1399,28 @@ void DownloadEngine::beginSegments(quint64 id) {
         }
     }
     task->receivedBytes = task->sumSegmentBytes();
+    if (task->totalBytes > 0 && partExists) {
+        QFile part(task->partPath());
+        if (part.open(QIODevice::ReadOnly)) {
+            const QByteArray head = part.read(512);
+            part.close();
+            if (looksLikeHtmlDocument(head) && !isHtmlLikeFileName(task->fileName)) {
+                QFile::remove(task->partPath());
+                task->receivedBytes = 0;
+                task->segments.clear();
+                task->lastError = QStringLiteral("Se descartó una respuesta HTML previa; vuelve a iniciar la descarga");
+                if (m_db != nullptr && m_db->isOpen()) {
+                    m_db->saveSegments(id, task->segments, nullptr);
+                }
+                task->state = DownloadState::Failed;
+                persistProgress(id);
+                destroyRuntime(id);
+                emit taskUpdated(id);
+                emit toast(task->lastError, 2);
+                return;
+            }
+        }
+    }
 
     // 3) Estado y arranque.
     task->state = DownloadState::Downloading;
@@ -1330,8 +1435,20 @@ void DownloadEngine::beginSegments(quint64 id) {
             }
             continue;
         }
+        if (segment.endByte >= 0 && segment.receivedBytes >= segment.totalBytes()) {
+            if (SegmentInfo* mutableSeg = findSegment(*task, segment.index)) {
+                mutableSeg->receivedBytes = mutableSeg->totalBytes();
+                mutableSeg->state = SegmentState::Completed;
+            }
+            continue;
+        }
         spawnSegment(id, segment);
         ++spawned;
+    }
+
+    task->receivedBytes = task->sumSegmentBytes();
+    if (m_db != nullptr && m_db->isOpen()) {
+        m_db->saveSegments(id, task->segments, nullptr);
     }
 
     if (spawned == 0) {
@@ -1373,6 +1490,8 @@ void DownloadEngine::spawnSegment(quint64 id, const SegmentInfo& segment) {
     request.sendRange = runtime->rangeSupported && segment.endByte >= 0;
     request.proxy = m_settings.proxy;
     request.maxRetries = m_settings.maxRetries;
+    request.connectTimeoutSec = std::clamp(m_settings.connectTimeoutSec, 1, 120);
+    request.totalTimeoutSec = std::clamp(m_settings.totalTimeoutSec, request.connectTimeoutSec, 24 * 60 * 60);
 
     auto* worker = new SegmentWorker(request, runtime->io);
     auto* thread = new QThread();
@@ -1446,8 +1565,14 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
     if (outcome == SegmentResult::WebPage && !stopping && !refreshing && !removing && !degrading) {
         ++task->webpageStrikes;
         if (task->webpageStrikes <= 1) {
-            // Primer intento: se pide un enlace nuevo al navegador (como IDM).
-            enterWaitingRefresh(taskId, httpStatus);
+            // Solo el segmento inicial contiene suficiente evidencia fiable
+            // para solicitar un refresco global del enlace.
+            if (index == 0 || (findSegment(*task, index) != nullptr &&
+                                findSegment(*task, index)->startByte == 0)) {
+                enterWaitingRefresh(taskId, httpStatus);
+            } else {
+                failTask(taskId, QStringLiteral("Un segmento recibió HTML; se rechaza para evitar corromper el archivo"));
+            }
         } else {
             failTask(taskId, QStringLiteral(
                 "El servidor devuelve una página web en lugar del archivo "
@@ -1458,10 +1583,20 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
 
     // --- Servidor sin soporte de Range: degradacion a 1 hilo ---------------
     if (outcome == SegmentResult::RangeUnsupported && !stopping && !refreshing && !removing && !degrading) {
+        task->receivedBytes = 0;
+        for (SegmentInfo& segment : task->segments) {
+            segment.receivedBytes = 0;
+            segment.state = SegmentState::Pending;
+        }
+        QFile::remove(task->partPath());
         if (runtime != nullptr) {
             runtime->degradePending = true;
             runtime->rangeSupported = false;
             task->threadCount = 1;
+            runtime->deleteFilesOnFailure = false;
+            if (m_db != nullptr && m_db->isOpen()) {
+                m_db->saveSegments(taskId, task->segments, nullptr);
+            }
             for (SegmentWorker* worker : runtime->workers) {
                 if (worker != nullptr) {
                     worker->requestAbort();
@@ -1493,6 +1628,18 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
                 emit taskUpdated(taskId);
                 return;
             }
+            if (runtime != nullptr && runtime->deleteFilesOnFailure) {
+                QFile::remove(task->partPath());
+                task->receivedBytes = 0;
+                for (SegmentInfo& pending : task->segments) {
+                    pending.receivedBytes = 0;
+                    pending.state = SegmentState::Pending;
+                }
+                if (m_db != nullptr && m_db->isOpen()) {
+                    m_db->saveSegments(taskId, task->segments, nullptr);
+                }
+                persistProgress(taskId);
+            }
             finalizeStop(taskId);
             return;
         }
@@ -1503,7 +1650,11 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
     // --- Resultados normales ------------------------------------------------
     switch (outcome) {
         case SegmentResult::Completed: {
+            if (runtime != nullptr) {
+                runtime->retryAtMs = 0;
+            }
             if (SegmentInfo* segment = findSegment(*task, index)) {
+                segment->receivedBytes = received;
                 segment->state = SegmentState::Completed;
             }
             task->receivedBytes = task->sumSegmentBytes();
@@ -1555,6 +1706,9 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
             if (SegmentInfo* segment = findSegment(*task, index)) {
                 segment->state = SegmentState::Error;
             }
+            if (m_db != nullptr && m_db->isOpen()) {
+                m_db->saveSegments(taskId, task->segments, nullptr);
+            }
             ++task->retries;
             task->lastError = error.isEmpty() ? QStringLiteral("Error de red") : error;
             if (runtime == nullptr) {
@@ -1562,10 +1716,16 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
                 return;
             }
             if (task->retries <= m_settings.maxRetries) {
+                if (SegmentInfo* segment = findSegment(*task, index)) {
+                    segment->state = SegmentState::Pending;
+                }
                 const int shift = (std::min)(task->retries, 5);
                 const qint64 backoff = std::min<qint64>(30000, qint64(1000) * (qint64(1) << shift));
                 runtime->retryAtMs = nowMs() + backoff;
                 persistProgress(taskId);
+                if (m_db != nullptr && m_db->isOpen()) {
+                    m_db->saveSegments(taskId, task->segments, nullptr);
+                }
                 emit taskUpdated(taskId);
                 QTimer::singleShot(backoff, this, [this, taskId, index, expected = task->retries]() {
                     DownloadTask* current = mutableTask(taskId);
@@ -1578,7 +1738,8 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
                     }
                     rt->retryAtMs = 0;
                     if (SegmentInfo* segment = findSegment(*current, index)) {
-                        if (!segment->isComplete()) {
+                        if (!segment->isComplete() &&
+                            (!rt->workers.contains(index) || rt->workers.value(index) == nullptr)) {
                             spawnSegment(taskId, *segment);
                         }
                     }
@@ -1656,6 +1817,12 @@ void DownloadEngine::maybeRebalance(quint64 id) {
     if (runtime->workers.size() <= 1) {
         return; // sin compañeros que repartan carga
     }
+    // La lista se mantiene acotada para impedir crecimiento indefinido de
+    // segmentos en descargas de larga duracion.
+    constexpr qsizetype kMaxSegmentsPerTask = 256;
+    if (task->segments.size() >= kMaxSegmentsPerTask) {
+        return;
+    }
 
     int slowestIndex = -1;
     qint64 slowestRemaining = 0;
@@ -1701,14 +1868,33 @@ void DownloadEngine::performRebalance(quint64 id, int index, qint64 received) {
     if (segment == nullptr) {
         return;
     }
+    constexpr qsizetype kMaxSegmentsPerTask = 256;
+    if (task->segments.size() >= kMaxSegmentsPerTask) {
+        segment->receivedBytes = received;
+        segment->state = SegmentState::Pending;
+        if (m_db != nullptr && m_db->isOpen()) {
+            m_db->saveSegments(id, task->segments, nullptr);
+        }
+        spawnSegment(id, *segment);
+        return;
+    }
     segment->receivedBytes = received;
     segment->state = SegmentState::Pending;
 
     const qint64 position = segment->startByte + received;
     const qint64 remaining = segment->endByte - position + 1;
 
+    if (remaining <= 0) {
+        segment->receivedBytes = segment->totalBytes();
+        segment->state = SegmentState::Completed;
+        if (runtime->workers.isEmpty() && allSegmentsComplete(*task)) {
+            finalizeDownload(id);
+        }
+        return;
+    }
     if (remaining < kMinSegmentBytes * 2) {
-        // Demasiado pequeño para partir: solo se relanza.
+        // Demasiado pequeño para partir: relanza solo los bytes restantes.
+        segment->receivedBytes = position - segment->startByte;
         if (runtime->rangeSupported) {
             spawnSegment(id, *segment);
         }
@@ -1717,9 +1903,11 @@ void DownloadEngine::performRebalance(quint64 id, int index, qint64 received) {
 
     const qint64 midpoint = position + remaining / 2;
 
-    // La primera mitad continua en el segmento original...
+    // El segmento original conserva el prefijo descargado; el nuevo rango
+    // comienza exactamente en su siguiente byte, sin solapamiento.
     const qint64 originalEnd = segment->endByte;
     segment->endByte = midpoint;
+    segment->receivedBytes = midpoint - segment->startByte + 1;
 
     // ...y la segunda mitad se asigna a un nuevo hilo (hilo B de la spec).
     SegmentInfo second;
@@ -1780,6 +1968,9 @@ void DownloadEngine::finalizeStop(quint64 id) {
     }
     task->receivedBytes = task->sumSegmentBytes();
     task->bytesPerSec = 0.0;
+    if (task->state == DownloadState::Downloading || task->state == DownloadState::Connecting) {
+        task->state = DownloadState::Paused;
+    }
     task->updatedAt = QDateTime::currentDateTime();
     persistProgress(id);
     if (m_db != nullptr && m_db->isOpen()) {
@@ -1809,6 +2000,14 @@ void DownloadEngine::failTask(quint64 id, const QString& message) {
 
     Runtime* runtime = runtimeFor(id, false);
     if (runtime == nullptr || runtime->workers.isEmpty()) {
+        if (runtime != nullptr && runtime->deleteFilesOnFailure) {
+            QFile::remove(task->partPath());
+            task->receivedBytes = 0;
+            for (SegmentInfo& segment : task->segments) {
+                segment.receivedBytes = 0;
+            }
+            persistProgress(id);
+        }
         if (m_db != nullptr && m_db->isOpen()) {
             m_db->saveSegments(id, task->segments, nullptr);
         }
@@ -1974,6 +2173,19 @@ void DownloadEngine::finalizeDownload(quint64 id) {
 
     // 2) Verificacion de integridad (tamano exacto anunciado por el servidor).
     const qint64 finalSize = QFileInfo(partPath).size();
+    if (!task->segments.isEmpty()) {
+        for (const SegmentInfo& segment : task->segments) {
+            if (segment.endByte >= segment.startByte && !segment.isComplete()) {
+                task->state = DownloadState::Failed;
+                task->lastError = QStringLiteral("Verificación fallida: segmento %1 incompleto").arg(segment.index);
+                persistProgress(id);
+                emit taskUpdated(id);
+                emit toast(task->lastError, 2);
+                pumpGuarded();
+                return;
+            }
+        }
+    }
     if (task->totalBytes > 0 && finalSize != task->totalBytes) {
         task->state = DownloadState::Failed;
         task->lastError = QStringLiteral("Verificación fallida: %1 != %2")
@@ -1985,35 +2197,50 @@ void DownloadEngine::finalizeDownload(quint64 id) {
         return;
     }
 
-    // 2b) Anti "descargar una web": si el resultado es una pagina HTML y el
-    // archivo no deberia serlo, no se guarda jamas como fichero final.
+    // 2b) Verifica cada rango por separado: una respuesta HTML de cualquier
+    // segmento se rechaza aunque el primer rango contuviera datos binarios.
     if (!isHtmlLikeFileName(task->fileName)) {
+        bool containsHtml = false;
         QFile probeFile(partPath);
-        if (probeFile.open(QIODevice::ReadOnly)) {
+        for (const SegmentInfo& segment : task->segments) {
+            if (segment.receivedBytes <= 0) {
+                continue;
+            }
+            if (!probeFile.open(QIODevice::ReadOnly)) {
+                break;
+            }
+            if (!probeFile.seek(segment.startByte)) {
+                probeFile.close();
+                continue;
+            }
             const QByteArray head = probeFile.read(512);
             probeFile.close();
             if (looksLikeHtmlDocument(head)) {
-                QFile::remove(partPath);
-                task->state = DownloadState::Failed;
-                task->lastError = QStringLiteral(
-                    "El servidor devolvió una página web en lugar del archivo; no se guardó nada");
-                task->receivedBytes = 0;
-                for (SegmentInfo& segment : task->segments) {
-                    segment.receivedBytes = 0;
-                    segment.state = SegmentState::Error;
-                }
-                persistProgress(id);
-                if (m_db != nullptr && m_db->isOpen()) {
-                    m_db->saveSegments(id, task->segments, nullptr);
-                }
-                emit taskUpdated(id);
-                emit statusChanged();
-                emit toast(task->lastError, 2);
-                log::warn("Tarea {}: contenido HTML descartado (anti-descarga de web)",
-                          static_cast<unsigned long long>(id));
-                pumpGuarded();
-                return;
+                containsHtml = true;
+                break;
             }
+        }
+        if (containsHtml) {
+            QFile::remove(partPath);
+            task->state = DownloadState::Failed;
+            task->lastError = QStringLiteral(
+                "El servidor devolvió una página web en lugar del archivo; no se guardó nada");
+            task->receivedBytes = 0;
+            for (SegmentInfo& segment : task->segments) {
+                segment.receivedBytes = 0;
+                segment.state = SegmentState::Error;
+            }
+            persistProgress(id);
+            if (m_db != nullptr && m_db->isOpen()) {
+                m_db->saveSegments(id, task->segments, nullptr);
+            }
+            emit taskUpdated(id);
+            emit statusChanged();
+            emit toast(task->lastError, 2);
+            log::warn("Tarea {}: contenido HTML descartado (anti-descarga de web)",
+                      static_cast<unsigned long long>(id));
+            pumpGuarded();
+            return;
         }
     }
 
