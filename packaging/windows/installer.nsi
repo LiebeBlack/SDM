@@ -1,4 +1,4 @@
-; ============================================================================
+﻿; ============================================================================
 ;  S-DOWNLOAD MANAGER (SDM)
 ;  packaging/windows/installer.nsi
 ;
@@ -15,6 +15,9 @@
 ;  y la extensión en ..\..\extension.
 ; ============================================================================
 
+; NOTA: guardar este fichero como UTF-8 CON BOM (combinado con 'Unicode true').
+; makensis lee el BOM y convierte los acentos/simbolos a Unicode; sin BOM
+; interpreta el script como ANSI (ACP) y el texto sale corrupto.
 Unicode true
 ; Declaracion de compatibilidad en el manifiesto del instalador (Win10/11 usa
 ; el GUID de Win10). Equivale a los supportedOS de packaging/windows/app.manifest.
@@ -49,9 +52,9 @@ Var ExtIDBox
 Var WarnLabel
 
 ; ---------------------------------------------------------------------------
-; Página personalizada: ID de la extensión (para allowed_origins de Chrome)
+; Página personalizada: ID de la extensión (para allowed_origins de Chrome).
+; La declaración `Page custom` va más abajo, justo después de MUI_PAGE_DIRECTORY.
 ; ---------------------------------------------------------------------------
-Page custom fncExtIdPageCreate fncExtIdPageLeave
 
 Function fncExtIdPageCreate
     !insertmacro MUI_HEADER_TEXT "Puente nativo" "Identificador de la extensión del navegador"
@@ -61,28 +64,23 @@ Function fncExtIdPageCreate
         Abort
     ${EndIf}
 
-    nsDialogs::CreateControl /LABEL MS Sans Serif 9 "texto" "" 0 0 100% 40u \
-        "Abra chrome://extensions, active 'Modo de desarrollador' y copie el ID de$\n\
-        'S-Download Manager'. Si aún no ha cargado la extensión, puede dejar$\n\
-        este campo como está y registrarlo después con SDM (Ajustes $\x{2192} Puente)."
+    ${NSD_CreateLabel} 0 0 100% 48u "Copie el ID de la extensión desde chrome://extensions (o edge://extensions) con el 'Modo de desarrollador' activado. Si aún no la ha cargado, deje el valor por defecto y regístrelo más tarde desde SDM (Ajustes → Puente)."
     Pop $0
 
     ${If} $ExtID == ""
         StrCpy $ExtID "EXTENSION_ID_REPLACE_ME"
     ${EndIf}
 
-    nsDialogs::CreateControl /LABEL MS Sans Serif 9 "texto" "" 0 50u 30% 12u "ID de la extensión:"
+    ${NSD_CreateLabel} 0 52u 100% 10u "ID de la extensión:"
     Pop $0
-    nsDialogs::CreateControl EDIT ${WS_EX_CLIENTEDGE} "" 0 65u 100% 12u $ExtID
+    ${NSD_CreateText} 0 63u 100% 12u $ExtID
     Pop $ExtIDBox
 
-    nsDialogs::CreateControl /LABEL MS Sans Serif 8 "texto" "" 0 85u 100% 30u \
-        "Firefox: añada un ID fijo (browser_specific_settings $\x{2192} gecko $\x{2192} id)$\n\
-        con valor sdm@sdm.local; el instalador lo registra por defecto."
+    ${NSD_CreateLabel} 0 78u 100% 34u "Firefox: use un ID fijo (browser_specific_settings → gecko → id = sdm@sdm.local); el instalador lo registra por defecto."
     Pop $WarnLabel
 
     nsDialogs::Show
-Function End
+FunctionEnd
 
 Function fncExtIdPageLeave
     Pop $0 ; HWND del diálogo
@@ -90,11 +88,12 @@ Function fncExtIdPageLeave
     ${If} $ExtID == ""
         StrCpy $ExtID "EXTENSION_ID_REPLACE_ME"
     ${EndIf}
-Function End
+FunctionEnd
 
 !insertmacro MUI_PAGE_DIRECTORY
-; La página personalizada ya se insertó con `Page custom` (va después del directorio
-; gracias al orden de declaración: custom -> directory -> instfiles).
+; Página personalizada "Puente nativo": el orden de declaración define el orden
+; de las páginas, así que se inserta aquí para que aparezca tras el directorio.
+Page custom fncExtIdPageCreate fncExtIdPageLeave
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 
@@ -123,7 +122,7 @@ Function EscapeJsonPath
         ${EndIf}
         IntOp $R7 $R7 + 1
     ${Loop}
-Function End
+FunctionEnd
 
 Section "Programa (obligatorio)" SecMain
     SectionIn RO
@@ -241,7 +240,7 @@ Section Uninstall
     Delete "$INSTDIR\uninstall.exe"
     RMDir /r "$INSTDIR\bin"
     RMDir /r "$INSTDIR\extension"
-    RMDir /r "$INSTDIR\qml" 2>/dev/null
+    RMDir /r "$INSTDIR\qml" ; puede no existir: RMDir falla sin mas si no esta
     RMDir "$INSTDIR"
 
     DeleteRegKey HKCU "Software\${PRODUCT_NAME}"
