@@ -11,6 +11,11 @@ S-Download Manager is a multithreaded download accelerator with HLS/DASH stream 
 - Download pausing, resuming, and error recovery
 - Configurable thread counts and connection settings
 - Blocked sites list and extension-based capture
+- Anti-HTML guard: an HTML response (login/error page) is never saved as the
+  file; SDM automatically requests a fresh link from the browser instead
+- Browser-style context menu capture: download a link, a video or every
+  downloadable link on the page from the extension
+- Exact-byte resume with ETag validation and dynamic re-segmentation
 
 ## Build & Install
 

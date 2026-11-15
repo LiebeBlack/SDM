@@ -29,7 +29,8 @@ enum class SegmentResult : int {
     Aborted = 1,          // Detenido por el usuario / re-segmentacion
     Failed = 2,           // Error de red tras agotar reintentos
     Expired = 3,          // HTTP 403/401 -> refresco de enlace requerido
-    RangeUnsupported = 4  // El servidor ignora "Range" (fallback a 1 hilo)
+    RangeUnsupported = 4, // El servidor ignora "Range" (fallback a 1 hilo)
+    WebPage = 5           // El servidor devolvio HTML en vez del archivo
 };
 
 /// Peticion inmutable de descarga de un segmento.
@@ -91,6 +92,10 @@ private:
     // Escritura efectiva en disco (offset = startByte + received).
     bool appendToDisk(const char* data, qint64 len);
 
+    // Anti "descargar una web": decide sobre los primeros bytes del cuerpo.
+    // 0 = contenido legitimo (retenido escrito), 1 = pagina web, 2 = error de disco.
+    int finishSniff();
+
     bool isRangeComplete() const;
     QString rangeHeaderValue() const;
 
@@ -103,6 +108,9 @@ private:
     // Estado solo-hilo (no necesita proteccion):
     int m_lastStatus = 0;       // Ultimo codigo HTTP observado
     bool m_rangeIgnored = false;// El servidor respondio 200 a un rango con offset > 0
+    bool m_sniffPending = false;// Olfateo anti-HTML pendiente (solo offset 0)
+    bool m_webPage = false;     // El cuerpo resulto ser una pagina web
+    QByteArray m_sniffBuf;      // Primeros bytes retenidos hasta decidir
 };
 
 } // namespace sdm

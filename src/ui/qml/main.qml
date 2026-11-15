@@ -57,6 +57,14 @@ ApplicationWindow {
         sequence: "Ctrl+,"
         onActivated: settingsDialog.open()
     }
+    Shortcut {
+        sequence: "Ctrl+Delete"
+        onActivated: bridge.clearCompleted()
+    }
+    Shortcut {
+        sequence: "Ctrl+O"
+        onActivated: bridge.openFolderFor(root.selectedTaskId)
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -70,6 +78,7 @@ ApplicationWindow {
             onNewTaskRequested: newTaskModal.prepare({})
             onResumeAllRequested: bridge.resumeAll()
             onPauseAllRequested: bridge.pauseAll()
+            onClearCompletedRequested: bridge.clearCompleted()
             onSettingsRequested: settingsDialog.open()
         }
 
@@ -141,6 +150,12 @@ ApplicationWindow {
                     font.pixelSize: Style.fontSizeSmall
                     font.family: "Consolas, 'DejaVu Sans Mono', monospace"
                     color: Theme.success
+                }
+                Text {
+                    text: "RAM: " + bridge.memoryMb.toFixed(1) + " MB"
+                    font.pixelSize: Style.fontSizeSmall
+                    font.family: "Consolas, 'DejaVu Sans Mono', monospace"
+                    color: Theme.subtleText
                 }
 
                 Item { Layout.fillWidth: true }

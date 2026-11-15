@@ -7,6 +7,7 @@
 // ============================================================================
 #pragma once
 
+#include <QByteArray>
 #include <QDateTime>
 #include <QList>
 #include <QMap>
@@ -175,6 +176,7 @@ struct DownloadTask {
 
     int threadCount = kDefaultThreads;
     int retries = 0;
+    int webpageStrikes = 0;    // Veces que el servidor devolvio HTML (transitorio)
     bool probed = false;       // true -> capacidades ya conocidas
     bool streamJob = false;    // true -> descarga HLS/DASH gestionada por StreamDownloader
 
@@ -414,6 +416,67 @@ inline QString sanitizeFileName(const QString& name) {
 }
 
 /// Texto de estado en espanol (etiquetas de la UI).
+/// Extensiones que legitiman una respuesta HTML (un .zip no puede ser HTML).
+inline bool isHtmlLikeFileName(const QString& fileName) {
+    const QString lower = fileName.toLower();
+    const int dot = lower.lastIndexOf(QLatin1Char('.'));
+    if (dot < 0) {
+        return false;
+    }
+    const QString ext = lower.mid(dot + 1);
+    return ext == QLatin1String("html") || ext == QLatin1String("htm") ||
+           ext == QLatin1String("xhtml") || ext == QLatin1String("shtml") ||
+           ext == QLatin1String("mht") || ext == QLatin1String("mhtml");
+}
+
+/// Detecta si la cabecera de un fichero es un documento HTML completo
+/// (anti "descargar una web": BOM, prologo XML, comentarios y DOCTYPE se
+/// saltan para decidir por la etiqueta raiz).
+inline bool looksLikeHtmlDocument(const QByteArray& head) {
+    QByteArray s = head;
+    if (s.startsWith("\xEF\xBB\xBF")) {
+        s.remove(0, 3); // UTF-8 BOM
+    }
+    const int n = s.size();
+    int i = 0;
+    while (i < n) {
+        while (i < n && (s.at(i) == ' ' || s.at(i) == '\t' || s.at(i) == '\r' || s.at(i) == '\n')) {
+            ++i;
+        }
+        if (i >= n || s.at(i) != '<') {
+            return false; // primer byte no es marcado: binario u otro formato
+        }
+        if (s.mid(i, 4) == "<!--") {
+            const int end = s.indexOf("-->", i);
+            if (end < 0) {
+                return false; // comentario sin cerrar: ambiguo, no se bloquea
+            }
+            i = end + 3;
+            continue;
+        }
+        if (i + 1 < n && s.at(i + 1) == '?') {
+            const int end = s.indexOf("?>", i); // prologo <?xml ... ?>
+            if (end < 0) {
+                return false;
+            }
+            i = end + 2;
+            continue;
+        }
+        if (i + 1 < n && s.at(i + 1) == '!') {
+            const QByteArray decl = s.mid(i, 16).toLower();
+            return decl.startsWith("<!doctype") && decl.contains("html");
+        }
+        int j = i + 1;
+        while (j < n && ((s.at(j) >= 'a' && s.at(j) <= 'z') || (s.at(j) >= 'A' && s.at(j) <= 'Z') ||
+                         (s.at(j) >= '0' && s.at(j) <= '9'))) {
+            ++j;
+        }
+        const QByteArray tag = s.mid(i + 1, j - i - 1).toLower();
+        return tag == "html" || tag == "head" || tag == "title" || tag == "body";
+    }
+    return false;
+}
+
 inline QString stateText(DownloadState s) {
     switch (s) {
         case DownloadState::Queued: return QStringLiteral("En cola");

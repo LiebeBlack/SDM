@@ -465,6 +465,104 @@ function sniffDownloadUrl(originUrl, fileName) {
 }
 
 // ---------------------------------------------------------------------------
+// Menu contextual "Descargar con SDM" (estilo IDM)
+// ---------------------------------------------------------------------------
+
+const MENU_IDS = {
+  link: "sdm-dl-link",
+  media: "sdm-dl-media",
+  all: "sdm-dl-all"
+};
+
+function setupContextMenus() {
+  try {
+    chrome.contextMenus.removeAll(() => {
+      chrome.contextMenus.create({
+        id: MENU_IDS.link,
+        title: "Descargar este enlace con SDM",
+        contexts: ["link"]
+      });
+      chrome.contextMenus.create({
+        id: MENU_IDS.media,
+        title: "Descargar este vídeo/imagen con SDM",
+        contexts: ["video", "audio", "image"]
+      });
+      chrome.contextMenus.create({
+        id: MENU_IDS.all,
+        title: "Descargar todos los enlaces de la página con SDM",
+        contexts: ["page"]
+      });
+    });
+  } catch (e) {
+    log("contextMenus no disponible:", e && e.message);
+  }
+}
+
+// Encola una descarga en SDM con cookies + referer (compartido por menú,
+// popup y captura de descargas del navegador).
+async function queueDownload(url, referer, fileName) {
+  if (!url || isBlockedUrl(url)) return false;
+  ensureChannel();
+  const cookies = await cookiesForUrl(url);
+  const name = fileName || decodeURIComponent(String(url).split("?")[0].split("/").pop() || "");
+  if (looksLikeMediaManifest(url)) {
+    return sendToSdm({
+      type: "startStream",
+      ref: newRef("s"),
+      payload: { url, destDir: "", referer, cookies, fileName: name }
+    });
+  }
+  return sendToSdm({
+    type: "addDownload",
+    ref: newRef("a"),
+    payload: {
+      url,
+      referer,
+      cookies,
+      userAgent: (typeof navigator !== "undefined" && navigator.userAgent) || "",
+      fileName: name,
+      destDir: "",
+      pageUrl: referer,
+      httpUser: "",
+      httpPass: "",
+      threads: config.threads || 0,
+      autoStart: config.autoStart !== false
+    }
+  });
+}
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (!config.enabled) return;
+  const pageUrl = info.pageUrl || (tab && tab.url) || "";
+
+  if (info.menuItemId === MENU_IDS.link && info.linkUrl) {
+    await queueDownload(info.linkUrl, pageUrl);
+    return;
+  }
+  if (info.menuItemId === MENU_IDS.media && info.srcUrl) {
+    await queueDownload(info.srcUrl, pageUrl);
+    return;
+  }
+  if (info.menuItemId === MENU_IDS.all && tab && tab.id != null) {
+    chrome.tabs.sendMessage(tab.id, { type: "sdm:collectLinks" }, async (response) => {
+      if (chrome.runtime.lastError || !response || !response.ok) {
+        lastToast = { message: "No se pudieron recoger los enlaces de la página", level: 2, ts: Date.now() };
+        return;
+      }
+      const links = (response.links || []).filter((u) => shouldCaptureExtension(u) || looksLikeMediaManifest(u));
+      for (const url of links.slice(0, 100)) {
+        await queueDownload(url, pageUrl);
+      }
+      lastToast = {
+        message: links.length > 0 ? `${Math.min(links.length, 100)} enlaces enviados a SDM` : "Sin enlaces descargables en la página",
+        level: links.length > 0 ? 0 : 1,
+        ts: Date.now()
+      };
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Intercepcion de descargas del navegador
 // ---------------------------------------------------------------------------
 
@@ -638,6 +736,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: true });
       return false;
 
+    case "sdm:downloadUrl": {
+      const p = message.payload || {};
+      if (!p.url) {
+        sendResponse({ ok: false, error: "Falta la URL" });
+        return false;
+      }
+      queueDownload(p.url, p.referer || "", p.fileName || "").then((ok) => {
+        sendResponse({ ok });
+      });
+      return true;
+    }
+
     default:
       return false;
   }
@@ -651,6 +761,7 @@ chrome.runtime.onInstalled.addListener(() => {
   loadConfig().then(() => {
     updateBadge();
     ensureChannel();
+    setupContextMenus();
   });
 });
 

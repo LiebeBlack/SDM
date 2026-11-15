@@ -23,6 +23,9 @@ namespace sdm {
 SegmentWorker::SegmentWorker(SegmentRequest request, FileAllocator* io, QObject* parent)
     : QObject(parent), m_request(std::move(request)), m_io(io) {
     m_received.store(m_request.initialReceived, std::memory_order_relaxed);
+    // Anti "descargar una web": se retienen los primeros bytes cuando este
+    // worker escribe el inicio del archivo (offset 0 sin reanudacion).
+    m_sniffPending = (m_request.startByte == 0 && m_request.initialReceived == 0);
 }
 
 SegmentWorker::~SegmentWorker() = default;
@@ -85,10 +88,62 @@ size_t SegmentWorker::writeThunk(char* ptr, size_t size, size_t nmemb, void* use
         return 0;
     }
     const size_t total = size * nmemb;
-    if (!self->appendToDisk(ptr, static_cast<qint64>(total))) {
+
+    // Capacidad restante del rango: jamas se escribe mas alla de endByte
+    // (un servidor que mande de mas no puede corromper los segmentos vecinos).
+    qint64 capacity = -1;
+    if (m_request.endByte >= 0) {
+        const qint64 consumed = m_request.startByte +
+                                m_received.load(std::memory_order_relaxed) +
+                                m_sniffBuf.size();
+        capacity = (m_request.endByte + 1) - consumed;
+        if (capacity <= 0) {
+            return 0; // rango ya completo: corta la transferencia
+        }
+    }
+    const bool truncated = (capacity >= 0 && static_cast<qint64>(total) > capacity);
+
+    // Anti "descargar una web": retiene los primeros bytes hasta poder
+    // confirmar que el cuerpo es un archivo y no una pagina HTML.
+    if (self->m_sniffPending) {
+        const size_t take = truncated ? static_cast<size_t>(capacity) : total;
+        self->m_sniffBuf.append(ptr, static_cast<qsizetype>(take));
+        if (self->m_sniffBuf.size() < 512 && !truncated) {
+            return total; // bytes retenidos; se escriben al decidir
+        }
+        // finishSniff() escribe el buffer (que ya incluye este chunk) o lo
+        // descarta si resulta ser una pagina web.
+        const int verdict = self->finishSniff();
+        if (verdict != 0) {
+            if (verdict == 1) {
+                self->m_webPage = true; // una web jamas se guarda como archivo
+            }
+            return 0;
+        }
+        return truncated ? 0 : total; // truncado al rango -> corta limpio
+    }
+
+    const qint64 len = truncated ? capacity : static_cast<qint64>(total);
+    if (!self->appendToDisk(ptr, len)) {
         return 0;
     }
-    return total;
+    return truncated ? 0 : total;
+}
+
+int SegmentWorker::finishSniff() {
+    m_sniffPending = false;
+    const QByteArray head = m_sniffBuf;
+    m_sniffBuf.clear();
+
+    // Cuerpo HTML + nombre de archivo no web => el servidor devolvio una
+    // pagina (login, error o interstitial) en lugar del fichero pedido.
+    if (looksLikeHtmlDocument(head) && !isHtmlLikeFileName(m_request.task.fileName)) {
+        log::warn("SegmentWorker task={} seg={}: el cuerpo es una pagina web, no un archivo",
+                  static_cast<long long>(m_request.task.id), m_request.index);
+        return 1;
+    }
+    // Contenido legitimo: se escriben los bytes retenidos en su offset.
+    return appendToDisk(head.constData(), head.size()) ? 0 : 2;
 }
 
 size_t SegmentWorker::headerThunk(char* buffer, size_t size, size_t nitems, void* userdata) {
@@ -192,6 +247,8 @@ bool SegmentWorker::performOnce(int* httpStatus, bool* rangeIgnored, QString* er
     if (rc != CURLE_OK) {
         if (m_abort.load(std::memory_order_relaxed)) {
             *error = QStringLiteral("abortado");
+        } else if (m_webPage) {
+            *error = QStringLiteral("El servidor devolvió una página web en lugar del archivo");
         } else if (rc == CURLE_HTTP_RETURNED_ERROR) {
             *error = QStringLiteral("HTTP %1").arg(m_lastStatus);
         } else if (rc == CURLE_OPERATION_TIMEDOUT) {
@@ -206,6 +263,19 @@ bool SegmentWorker::performOnce(int* httpStatus, bool* rangeIgnored, QString* er
         }
     } else {
         error->clear();
+    }
+
+    // Cierre del olfateo anti-HTML: cuerpos < 512 bytes se deciden al final.
+    if (m_sniffPending && !m_sniffBuf.isEmpty() && !m_webPage) {
+        if (rc == CURLE_OK && !m_abort.load(std::memory_order_relaxed)) {
+            if (finishSniff() == 1) {
+                m_webPage = true;
+            }
+        } else {
+            // Reintento/abort: se descartan los bytes retenidos (no contados
+            // en m_received) y se volveran a pedir en el siguiente intento.
+            m_sniffBuf.clear();
+        }
     }
 
     curl_slist_free_all(slist);
@@ -239,8 +309,16 @@ void SegmentWorker::start() {
 
         // 1) Abort solicitado (pausa / re-segmentacion / cierre).
         if (m_abort.load(std::memory_order_relaxed)) {
-            emit finished(m_request.task.id, m_request.index, m_received.load(),
+            emit finished(m_request.task.id, m_request.index, m_received.load(), 
                           static_cast<int>(SegmentResult::Aborted), status, QString());
+            return;
+        }
+
+        // 1b) Anti "descargar una web": el cuerpo era una pagina HTML.
+        if (m_webPage) {
+            emit finished(m_request.task.id, m_request.index, m_received.load(),
+                          static_cast<int>(SegmentResult::WebPage), status,
+                          QStringLiteral("El servidor devolvió una página web en lugar del archivo"));
             return;
         }
 

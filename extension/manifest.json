@@ -12,6 +12,7 @@
     "cookies",
     "tabs",
     "alarms",
+    "contextMenus",
     "declarativeNetRequest"
   ],
   "host_permissions": [

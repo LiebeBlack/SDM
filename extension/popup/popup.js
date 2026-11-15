@@ -180,6 +180,58 @@ function bindControls() {
   $("quick-url").addEventListener("keydown", (e) => {
     if (e.key === "Enter") $("quick-add").click();
   });
+
+  // --- Captura de página (medios detectados / todos los enlaces) ---------
+
+  $("capture-media").addEventListener("click", async () => {
+    const feedback = $("capture-feedback");
+    feedback.textContent = "Buscando transmisión…";
+    feedback.className = "feedback";
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) {
+      feedback.textContent = "Sin pestaña activa.";
+      feedback.className = "feedback err";
+      return;
+    }
+    chrome.tabs.sendMessage(tab.id, { type: "sdm:capturePageMedia" }, (response) => {
+      if (chrome.runtime.lastError || !response || !response.ok) {
+        feedback.textContent = "Sin vídeo/transmisión detectado en esta página.";
+        feedback.className = "feedback err";
+      } else {
+        feedback.textContent = "Transmisión enviada a SDM.";
+        feedback.className = "feedback ok";
+      }
+    });
+  });
+
+  $("capture-links").addEventListener("click", async () => {
+    const feedback = $("capture-feedback");
+    feedback.textContent = "Recogiendo enlaces…";
+    feedback.className = "feedback";
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) {
+      feedback.textContent = "Sin pestaña activa.";
+      feedback.className = "feedback err";
+      return;
+    }
+    chrome.tabs.sendMessage(tab.id, { type: "sdm:collectLinks" }, async (response) => {
+      if (chrome.runtime.lastError || !response || !response.ok) {
+        feedback.textContent = "No se pudieron recoger los enlaces.";
+        feedback.className = "feedback err";
+        return;
+      }
+      const links = response.links || [];
+      let sent = 0;
+      for (const url of links.slice(0, 100)) {
+        const r = await send({ type: "sdm:downloadUrl", payload: { url, referer: tab.url || "" } });
+        if (r.ok) sent++;
+      }
+      feedback.textContent = sent > 0
+        ? `${sent} enlace(s) enviado(s) a SDM.`
+        : "Sin enlaces descargables en la página.";
+      feedback.className = sent > 0 ? "feedback ok" : "feedback err";
+    });
+  });
 }
 
 document.addEventListener("DOMContentLoaded", () => {

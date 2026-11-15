@@ -10,12 +10,21 @@ Rectangle {
     signal newTaskRequested()
     signal resumeAllRequested()
     signal pauseAllRequested()
+    signal clearCompletedRequested()
     signal settingsRequested()
 
     height: Style.toolbarHeight
     color: Theme.surface
     border.color: Theme.border
     border.width: 0
+
+    // Boton con tooltip reutilizable.
+    component ToolAction: SdmToolButton {
+        property string tip: ""
+        ToolTip.visible: hovered && tip !== ""
+        ToolTip.delay: 600
+        ToolTip.text: tip
+    }
 
     RowLayout {
         anchors.fill: parent
@@ -49,33 +58,38 @@ Rectangle {
 
         Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; color: Theme.border; Layout.topMargin: 8; Layout.bottomMargin: 8 }
 
-        SdmToolButton {
+        ToolAction {
             glyph: "＋"
             label: "Nueva"
             accent: true
+            tip: "Nueva descarga (Ctrl+N)"
             onClicked: toolbar.newTaskRequested()
         }
-        SdmToolButton {
+        ToolAction {
             glyph: "▶"
             label: "Reanudar"
+            tip: "Reanudar todas las descargas (Ctrl+Shift+R)"
             onClicked: toolbar.resumeAllRequested()
         }
-        SdmToolButton {
+        ToolAction {
             glyph: "⏸"
             label: "Pausar"
-            onClicked: toolbar.pauseAllRequested()
-        }
-        SdmToolButton {
-            glyph: "⏹"
-            label: "Detener"
+            tip: "Pausar todas las descargas (Ctrl+Shift+P)"
             onClicked: toolbar.pauseAllRequested()
         }
 
         Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; color: Theme.border; Layout.topMargin: 8; Layout.bottomMargin: 8 }
 
-        SdmToolButton {
+        ToolAction {
+            glyph: "🧹"
+            label: "Limpiar"
+            tip: "Quitar de la lista las descargas completadas"
+            onClicked: toolbar.clearCompletedRequested()
+        }
+        ToolAction {
             glyph: "⚙"
             label: "Ajustes"
+            tip: "Ajustes de la aplicación (Ctrl+,)"
             onClicked: toolbar.settingsRequested()
         }
 

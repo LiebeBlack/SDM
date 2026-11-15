@@ -44,15 +44,22 @@
     </section>
 
     <section class="card">
+      <h2>Captura de página</h2>
+      <button id="capture-media" class="secondary">⬇ Capturar vídeo/transmisión detectado</button>
+      <button id="capture-links" class="secondary">⬇ Descargar todos los enlaces</button>
+      <p id="capture-feedback" class="feedback"></p>
+    </section>
+
+    <section class="card">
       <h2>Ajustes</h2>
       <div class="field">
         <label for="threads-select">Hilos por tarea</label>
         <select id="threads-select">
           <option value="0">Automático</option>
-          <option value="4">4 hilos</option>
+          <option value="1">1 hilo</option>
+          <option value="6">6 hilos</option>
           <option value="8">8 hilos</option>
           <option value="16">16 hilos</option>
-          <option value="32">32 hilos</option>
         </select>
       </div>
       <div class="field checkbox-field">

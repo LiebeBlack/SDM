@@ -29,6 +29,9 @@ The `ref` field is a unique identifier for tracking responses. The `payload` con
 | `connect` | Establish connection to native host |
 | `disconnect` | Terminate connection |
 | `clearCompleted` | Clear completed downloads |
+| `sdm:downloadUrl` | Enqueue a single URL (popup quick actions / context menu) |
+| `sdm:collectLinks` | Content-script collector: return all page links (bulk capture) |
+| `sdm:capturePageMedia` | Content-script: capture the detected HLS/DASH/video |
 | `sdm:startStream` | Popup-initiated stream start |
 | `sdm:addDownload` | Popup-initiated download add |
 
@@ -134,3 +137,17 @@ Errors use the `error` type:
 ```json
 {"type": "error", "ref": "err123", "payload": {"message": "Descriptive error message"}}
 ```
+
+## Anti-HTML Guard (never save a web page as a file)
+When the server answers with an HTML document (login wall, error page,
+interstitial) instead of the requested file, SDM detects it by sniffing the
+first 512 body bytes (`<!doctype html`, `<html>`, XML prolog + root tag) and:
+
+1. Discards the received bytes — nothing is written to the final file.
+2. Requests a fresh link from the browser (`refreshUrl` flow, spec cap. 10)
+   on the first strike.
+3. Fails the task with an explicit message on the second strike, so the
+   refresh loop can never spin forever.
+
+Files whose name is itself an HTML extension (`.html`, `.htm`, `.xhtml`,
+`.shtml`, `.mht`, `.mhtml`) are exempt and download normally.

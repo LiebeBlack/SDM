@@ -136,6 +136,24 @@
       }
       return false;
     }
+    if (message && message.type === "sdm:collectLinks") {
+      // Recolector para "descargar todos los enlaces" (menu contextual).
+      try {
+        const urls = new Set();
+        document.querySelectorAll("a[href]").forEach((a) => {
+          try {
+            const abs = new URL(a.getAttribute("href"), location.href).href;
+            if (abs.startsWith("http://") || abs.startsWith("https://") || abs.startsWith("ftp://")) {
+              urls.add(abs);
+            }
+          } catch { /* href invalido */ }
+        });
+        sendResponse({ ok: true, links: Array.from(urls) });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e && e.message || e) });
+      }
+      return false;
+    }
     return false;
   });
 })();

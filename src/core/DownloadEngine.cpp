@@ -630,6 +630,7 @@ QVariantMap DownloadEngine::snapshot(const DownloadTask& task) {
     map.insert(QStringLiteral("size"), static_cast<qlonglong>(task.totalBytes));
     map.insert(QStringLiteral("sizeText"), humanSize(task.totalBytes));
     map.insert(QStringLiteral("received"), static_cast<qlonglong>(task.receivedBytes));
+    map.insert(QStringLiteral("receivedText"), humanSize(task.receivedBytes));
     map.insert(QStringLiteral("progress"), task.progress());
     map.insert(QStringLiteral("progressText"), humanPercent(task.progress()));
     map.insert(QStringLiteral("speed"), task.bytesPerSec);
@@ -644,6 +645,8 @@ QVariantMap DownloadEngine::snapshot(const DownloadTask& task) {
     map.insert(QStringLiteral("source"), task.source);
     map.insert(QStringLiteral("stream"), task.streamJob);
     map.insert(QStringLiteral("createdAt"), task.createdAt.toMSecsSinceEpoch());
+    map.insert(QStringLiteral("mimeType"), task.mimeType);
+    map.insert(QStringLiteral("retries"), task.retries);
     return map;
 }
 
@@ -926,6 +929,7 @@ void DownloadEngine::retryTask(quint64 id) {
         return;
     }
     task->retries = 0;
+    task->webpageStrikes = 0;
     task->lastError.clear();
     task->state = DownloadState::Queued;
     if (m_db != nullptr && m_db->isOpen()) {
@@ -1012,6 +1016,7 @@ void DownloadEngine::startAll() {
             DownloadTask* mutableRef = mutableTask(task.id);
             if (mutableRef != nullptr) {
                 mutableRef->retries = 0;
+                mutableRef->webpageStrikes = 0;
                 mutableRef->lastError.clear();
                 mutableRef->state = DownloadState::Queued;
                 if (mutableRef->probed == false && mutableRef->totalBytes > 0) {
@@ -1227,6 +1232,8 @@ void DownloadEngine::onProbeResult(quint64 taskId, const ProbeResult& result) {
     task->probed = true;
     task->retries = 0;
     task->lastError.clear();
+    // Nota: webpageStrikes NO se reinicia aqui a proposito (anti-bucle de
+    // refresco); solo lo resetea el usuario con Reintentar/Reanudar todo.
 
     runtime = runtimeFor(taskId, true);
     if (runtime == nullptr) {
@@ -1444,6 +1451,20 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
         return;
     }
 
+    // --- El servidor devolvio una web en vez del archivo (anti-descarga) ---
+    if (outcome == SegmentResult::WebPage && !stopping && !refreshing && !removing && !degrading) {
+        ++task->webpageStrikes;
+        if (task->webpageStrikes <= 1) {
+            // Primer intento: se pide un enlace nuevo al navegador (como IDM).
+            enterWaitingRefresh(taskId, httpStatus);
+        } else {
+            failTask(taskId, QStringLiteral(
+                "El servidor devuelve una página web en lugar del archivo "
+                "(¿enlace caducado o web protegida?). Actualiza el enlace e inténtalo de nuevo."));
+        }
+        return;
+    }
+
     // --- Servidor sin soporte de Range: degradacion a 1 hilo ---------------
     if (outcome == SegmentResult::RangeUnsupported && !stopping && !refreshing && !removing && !degrading) {
         if (runtime != nullptr) {
@@ -1517,7 +1538,17 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
 
         case SegmentResult::Aborted: {
             // Abort no planado (p.ej. cambio de estado) -> se relanza.
-            if (task->state == DownloadState::Downloading && runtime != nullptr && !runtime->workers.isEmpty()) {
+            if (task->state == DownloadState::Downloading && runtime != nullptr &&
+                !runtime->stopRequested && !runtime->refreshStopping) {
+                if (runtime->workers.isEmpty()) {
+                    // Ultimo worker: o la tarea esta completa, o hay que relanzar
+                    // para no dejarla estancada en estado Descargando.
+                    task->receivedBytes = task->sumSegmentBytes();
+                    if (allSegmentsComplete(*task)) {
+                        finalizeDownload(taskId);
+                        return;
+                    }
+                }
                 if (SegmentInfo* segment = findSegment(*task, index)) {
                     if (!segment->isComplete()) {
                         segment->state = SegmentState::Downloading;
@@ -1569,6 +1600,7 @@ void DownloadEngine::onSegmentFinished(quint64 taskId, int index, qint64 receive
 
         case SegmentResult::Expired:
         case SegmentResult::RangeUnsupported:
+        case SegmentResult::WebPage:
         default: {
             // Ya tratados arriba; si llegan aqui se dejan como error.
             if (SegmentInfo* segment = findSegment(*task, index)) {
@@ -1818,7 +1850,9 @@ void DownloadEngine::enterWaitingRefresh(quint64 id, int httpStatus) {
     }
 
     task->state = DownloadState::WaitingRefresh;
-    task->lastError = QStringLiteral("HTTP %1: el enlace caducó").arg(httpStatus);
+    task->lastError = (httpStatus == 403 || httpStatus == 401)
+                          ? QStringLiteral("HTTP %1: el enlace caducó").arg(httpStatus)
+                          : QStringLiteral("El servidor devolvió una página web; solicitando enlace nuevo");
     task->bytesPerSec = 0.0;
     task->receivedBytes = task->sumSegmentBytes();
     runtime->stopRequested = false;
@@ -1839,7 +1873,7 @@ void DownloadEngine::enterWaitingRefresh(quint64 id, int httpStatus) {
         connect(runtime->refreshTimer, &QTimer::timeout, this, [this, id]() {
             DownloadTask* current = mutableTask(id);
             if (current != nullptr && current->state == DownloadState::WaitingRefresh) {
-                failTask(id, QStringLiteral("No se pudo refrescar el enlace (403). Pulsa Reanudar para reintentar."));
+                failTask(id, QStringLiteral("No se pudo refrescar el enlace. Pulsa Reintentar para reintentar."));
             }
         });
     }
@@ -1852,7 +1886,10 @@ void DownloadEngine::enterWaitingRefresh(quint64 id, int httpStatus) {
 
     emit taskUpdated(id);
     emit statusChanged();
-    emit toast(QStringLiteral("Enlace caducado: pidiendo uno nuevo al navegador…"), 1);
+    emit toast((httpStatus == 403 || httpStatus == 401)
+                   ? QStringLiteral("Enlace caducado: pidiendo uno nuevo al navegador…")
+                   : QStringLiteral("Respuesta web recibida: pidiendo el archivo real al navegador…"),
+               1);
     emit tokenRefreshNeeded(id, task->originUrl.isEmpty() ? task->url : task->originUrl, task->fileName);
     log::warn("Tarea {} HTTP {} -> esperando refresco de enlace", static_cast<unsigned long long>(id), httpStatus);
 }
@@ -1958,6 +1995,38 @@ void DownloadEngine::finalizeDownload(quint64 id) {
         return;
     }
 
+    // 2b) Anti "descargar una web": si el resultado es una pagina HTML y el
+    // archivo no deberia serlo, no se guarda jamas como fichero final.
+    if (!isHtmlLikeFileName(task->fileName)) {
+        QFile probeFile(partPath);
+        if (probeFile.open(QIODevice::ReadOnly)) {
+            const QByteArray head = probeFile.read(512);
+            probeFile.close();
+            if (looksLikeHtmlDocument(head)) {
+                QFile::remove(partPath);
+                task->state = DownloadState::Failed;
+                task->lastError = QStringLiteral(
+                    "El servidor devolvió una página web en lugar del archivo; no se guardó nada");
+                task->receivedBytes = 0;
+                for (SegmentInfo& segment : task->segments) {
+                    segment.receivedBytes = 0;
+                    segment.state = SegmentState::Error;
+                }
+                persistProgress(id);
+                if (m_db != nullptr && m_db->isOpen()) {
+                    m_db->saveSegments(id, task->segments, nullptr);
+                }
+                emit taskUpdated(id);
+                emit statusChanged();
+                emit toast(task->lastError, 2);
+                log::warn("Tarea {}: contenido HTML descartado (anti-descarga de web)",
+                          static_cast<unsigned long long>(id));
+                pumpGuarded();
+                return;
+            }
+        }
+    }
+
     // 3) Renombra .part -> archivo final (evita pisar existentes).
     const QString target = uniqueTargetPath(task->savePath());
     QDir().mkpath(QFileInfo(target).absolutePath());
@@ -2016,13 +2085,15 @@ void DownloadEngine::pumpQueue() {
     m_pumping = true;
 
     const qint64 now = nowMs();
+    QSet<quint64> deferred; // tareas con backoff pendiente: no bloquean la cola
     int guard = 0;
     while (activeTaskCount() < m_settings.maxConcurrentTasks && guard++ < 64) {
         qsizetype candidate = -1;
         QDateTime oldest;
         for (qsizetype i = 0; i < m_tasks.size(); ++i) {
             const DownloadTask& task = m_tasks.at(i);
-            if (task.state != DownloadState::Queued || m_runtimes.contains(task.id)) {
+            if (task.state != DownloadState::Queued || m_runtimes.contains(task.id) ||
+                deferred.contains(task.id)) {
                 continue;
             }
             if (candidate < 0 || task.createdAt < oldest) {
@@ -2035,16 +2106,14 @@ void DownloadEngine::pumpQueue() {
         }
         const quint64 id = m_tasks.at(candidate).id;
 
-        // Backoff de reintento pendiente: no se adelanta.
+        // Backoff de reintento pendiente: no se adelanta, pero tampoco frena
+        // al resto de la cola.
         Runtime* runtime = runtimeFor(id, false);
         if (runtime != nullptr && runtime->retryAtMs > now) {
-            // Pone la tarea en espera hasta el siguiente intento.
-            DownloadTask* task = mutableTask(id);
-            if (task != nullptr && task->state == DownloadState::Queued) {
-                const qint64 delay = runtime->retryAtMs - now;
-                QTimer::singleShot(delay + 50, this, [this, id]() { pumpQueue(); });
-            }
-            break;
+            deferred.insert(id);
+            const qint64 delay = runtime->retryAtMs - now;
+            QTimer::singleShot(delay + 50, this, [this, id]() { pumpQueue(); });
+            continue;
         }
 
         startTask(id);

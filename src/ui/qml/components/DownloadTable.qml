@@ -110,8 +110,8 @@ Rectangle {
                     MouseArea {
                         anchors.fill: parent
                         hoverEnabled: true
-                        ToolTip.visible: containsMouse && parent.implicitWidth < parent.width
-                        ToolTip.text: row.model.name
+                        ToolTip.visible: containsMouse && parent.implicitWidth > parent.width
+                        ToolTip.text: row.model.name + "\n" + row.model.savePath
                         ToolTip.delay: 700
                     }
                 }
@@ -258,6 +258,10 @@ Rectangle {
                 MenuItem {
                     text: "Copiar URL"
                     onTriggered: bridge.copyText(row.model.url)
+                }
+                MenuItem {
+                    text: "Copiar ruta del archivo"
+                    onTriggered: bridge.copyText(row.model.savePath)
                 }
 
                 Menu {
