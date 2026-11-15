@@ -48,15 +48,6 @@ SegmentInfo* findSegment(DownloadTask& task, int index) {
     return nullptr;
 }
 
-const SegmentInfo* findSegment(const DownloadTask& task, int index) {
-    for (const SegmentInfo& segment : task.segments) {
-        if (segment.index == index) {
-            return &segment;
-        }
-    }
-    return nullptr;
-}
-
 /// Los segmentos cubren exactamente [0, total-1] y conservan sus bytes.
 bool segmentsAreValid(const DownloadTask& task) {
     if (task.segments.isEmpty() || task.totalBytes <= 0) {
@@ -129,13 +120,13 @@ struct ProbeSink {
 };
 
 QString parseDispositionFilename(const QString& raw) {
-    const int star = raw.indexOf(QLatin1String("filename*="), 0, Qt::CaseInsensitive);
+    const qsizetype star = raw.indexOf(QLatin1String("filename*="), 0, Qt::CaseInsensitive);
     if (star >= 0) {
         QString value = raw.mid(star + 10).trimmed();
         if (value.startsWith(QLatin1Char('"')) && value.endsWith(QLatin1Char('"')) && value.size() > 1) {
             value = value.mid(1, value.size() - 2);
         }
-        const int sep = value.indexOf(QLatin1String("''"));
+        const qsizetype sep = value.indexOf(QLatin1String("''"));
         if (sep >= 0) {
             value = value.mid(sep + 2);
         }
@@ -144,14 +135,14 @@ QString parseDispositionFilename(const QString& raw) {
             return decoded;
         }
     }
-    const int plain = raw.indexOf(QLatin1String("filename="), 0, Qt::CaseInsensitive);
+    const qsizetype plain = raw.indexOf(QLatin1String("filename="), 0, Qt::CaseInsensitive);
     if (plain >= 0) {
         QString value = raw.mid(plain + 9).trimmed();
         if (value.startsWith(QLatin1Char('"'))) {
-            const int end = value.indexOf(QLatin1Char('"'), 1);
+            const qsizetype end = value.indexOf(QLatin1Char('"'), 1);
             value = end > 0 ? value.mid(1, end - 1) : value.mid(1);
         } else {
-            const int semi = value.indexOf(QLatin1Char(';'));
+            const qsizetype semi = value.indexOf(QLatin1Char(';'));
             if (semi >= 0) {
                 value = value.left(semi);
             }
@@ -173,7 +164,7 @@ size_t probeHeaderThunk(char* buffer, size_t size, size_t nitems, void* userdata
     const QString line = QString::fromUtf8(buffer, static_cast<qsizetype>(length)).trimmed();
 
     if (line.startsWith(QLatin1String("HTTP/"))) {
-        const int space = line.indexOf(QLatin1Char(' '));
+        const qsizetype space = line.indexOf(QLatin1Char(' '));
         if (space > 0 && line.size() > space + 3) {
             bool okFlag = false;
             const int code = line.mid(space + 1, 3).toInt(&okFlag);
@@ -185,7 +176,7 @@ size_t probeHeaderThunk(char* buffer, size_t size, size_t nitems, void* userdata
         return length;
     }
 
-    const int colon = line.indexOf(QLatin1Char(':'));
+    const qsizetype colon = line.indexOf(QLatin1Char(':'));
     if (colon <= 0) {
         return length;
     }
@@ -206,7 +197,7 @@ size_t probeHeaderThunk(char* buffer, size_t size, size_t nitems, void* userdata
         sink->caps.lastModified = value;
     } else if (key == QLatin1String("content-type")) {
         QString mime = value;
-        const int semi = mime.indexOf(QLatin1Char(';'));
+        const qsizetype semi = mime.indexOf(QLatin1Char(';'));
         if (semi >= 0) {
             mime = mime.left(semi);
         }
@@ -219,7 +210,7 @@ size_t probeHeaderThunk(char* buffer, size_t size, size_t nitems, void* userdata
         }
     } else if (key == QLatin1String("content-range")) {
         // "bytes 0-0/123456"
-        const int slash = value.lastIndexOf(QLatin1Char('/'));
+        const qsizetype slash = value.lastIndexOf(QLatin1Char('/'));
         if (slash >= 0 && slash + 1 < value.size()) {
             const QString totalPart = value.mid(slash + 1).trimmed();
             bool okTotal = false;
@@ -1783,7 +1774,6 @@ void DownloadEngine::stopAllSegments(quint64 id, bool forRefresh, bool forStop) 
 
 void DownloadEngine::finalizeStop(quint64 id) {
     DownloadTask* task = mutableTask(id);
-    Runtime* runtime = runtimeFor(id, false);
     if (task == nullptr) {
         destroyRuntime(id);
         return;

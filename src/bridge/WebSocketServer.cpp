@@ -32,7 +32,7 @@ QString BridgeInfo::connectionKey() const {
 }
 
 bool BridgeInfo::parseConnectionKey(const QString& key, quint16* port, QString* token) {
-    const int colon = key.indexOf(QLatin1Char(':'));
+    const qsizetype colon = key.indexOf(QLatin1Char(':'));
     if (colon <= 0 || colon == key.size() - 1) {
         return false;
     }

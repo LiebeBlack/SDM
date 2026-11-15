@@ -50,7 +50,7 @@ Rectangle {
             visible: control.glyph !== ""
             text: control.glyph
             font.pixelSize: control.glyphSize
-            color: control.accent ? "#ffffff" : Theme.text
+            color: control.accent ? Theme.onAccent : Theme.text
             anchors.verticalCenter: parent.verticalCenter
         }
         Text {
@@ -58,7 +58,7 @@ Rectangle {
             text: control.label
             font.pixelSize: Style.fontSize
             font.weight: Font.Medium
-            color: control.accent ? "#ffffff" : Theme.text
+            color: control.accent ? Theme.onAccent : Theme.text
             anchors.verticalCenter: parent.verticalCenter
         }
     }

@@ -462,20 +462,20 @@ Rectangle {
                     onClicked: deleteDialog.close()
                 }
                 Rectangle {
-                    Layout.preferredWidth: cancelRowWidth
+                    property int deleteButtonWidth: 110
+                    Layout.preferredWidth: deleteButtonWidth
                     Layout.preferredHeight: 34
                     radius: Style.radiusSmall
-                    color: deleteRowMouse.containsMouse ? "#c93b2f" : Theme.danger
+                    color: deleteRowMouse.containsMouse ? Theme.dangerHover : Theme.danger
                     scale: deleteRowMouse.pressed ? 0.96 : 1.0
                     Behavior on color { ColorAnimation { duration: Style.animFast } }
                     Behavior on scale { NumberAnimation { duration: Style.animFast } }
-                    property int cancelRowWidth: 110
                     Text {
                         anchors.centerIn: parent
                         text: "Eliminar"
                         font.pixelSize: Style.fontSize
                         font.weight: Font.Medium
-                        color: "#ffffff"
+                        color: Theme.onAccent
                     }
                     MouseArea {
                         id: deleteRowMouse

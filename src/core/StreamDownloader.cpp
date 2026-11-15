@@ -35,10 +35,10 @@ namespace {
 
 QHash<QString, QString> parseAttrList(const QString& text) {
     QHash<QString, QString> out;
-    int i = 0;
-    const int n = text.size();
+    qsizetype i = 0;
+    const qsizetype n = text.size();
     while (i < n) {
-        const int eq = text.indexOf(QLatin1Char('='), i);
+        const qsizetype eq = text.indexOf(QLatin1Char('='), i);
         if (eq < 0) {
             break;
         }
@@ -46,11 +46,11 @@ QHash<QString, QString> parseAttrList(const QString& text) {
         i = eq + 1;
         QString value;
         if (i < n && text.at(i) == QLatin1Char('"')) {
-            const int end = text.indexOf(QLatin1Char('"'), i + 1);
+            const qsizetype end = text.indexOf(QLatin1Char('"'), i + 1);
             value = end < 0 ? text.mid(i + 1) : text.mid(i + 1, end - i - 1);
             i = end < 0 ? n : end + 1;
         } else {
-            const int comma = text.indexOf(QLatin1Char(','), i);
+            const qsizetype comma = text.indexOf(QLatin1Char(','), i);
             const int end = comma < 0 ? n : comma;
             value = text.mid(i, end - i).trimmed();
             i = end;
@@ -921,7 +921,7 @@ bool StreamDownloader::fetchSegmentsParallel(const QStringList& urls, const QStr
                                              const QString& cookies, const QString& proxy,
                                              const QString& tempDir, const QString& prefix,
                                              QStringList* outFilePaths, QString* error) {
-    const int count = urls.size();
+    const qsizetype count = urls.size();
     if (outFilePaths != nullptr) {
         outFilePaths->clear();
         outFilePaths->resize(count);
@@ -941,15 +941,15 @@ bool StreamDownloader::fetchSegmentsParallel(const QStringList& urls, const QStr
     QString firstError;
     QStringList paths(count);
 
-    const int workerCount = std::max(1, std::min(count, 4));
+    const qsizetype workerCount = std::max<qsizetype>(1, std::min<qsizetype>(count, 4));
     std::vector<std::thread> workers;
-    workers.reserve(workerCount);
+    workers.reserve(static_cast<size_t>(workerCount));
 
-    for (int w = 0; w < workerCount; ++w) {
+    for (qsizetype w = 0; w < workerCount; ++w) {
         workers.emplace_back([&, w]() {
             Q_UNUSED(w)
             while (!m_abort.load(std::memory_order_relaxed) && !failed.load(std::memory_order_relaxed)) {
-                const int index = nextIndex.fetch_add(1);
+                const qsizetype index = static_cast<qsizetype>(nextIndex.fetch_add(1));
                 if (index >= count) {
                     break;
                 }
@@ -984,7 +984,7 @@ bool StreamDownloader::fetchSegmentsParallel(const QStringList& urls, const QStr
                 received.fetch_add(bytes);
                 const int done = doneCount.fetch_add(1) + 1;
                 const qint64 totalSoFar = received.load();
-                const qint64 estimate = done > 0 ? (totalSoFar * count) / done : -1;
+                const qint64 estimate = done > 0 ? (totalSoFar * static_cast<qint64>(count)) / done : -1;
                 QMetaObject::invokeMethod(
                     this,
                     [this, totalSoFar, estimate]() { emit progress(totalSoFar, estimate); },

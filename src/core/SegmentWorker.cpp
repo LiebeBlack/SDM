@@ -92,11 +92,11 @@ size_t SegmentWorker::writeThunk(char* ptr, size_t size, size_t nmemb, void* use
     // Capacidad restante del rango: jamas se escribe mas alla de endByte
     // (un servidor que mande de mas no puede corromper los segmentos vecinos).
     qint64 capacity = -1;
-    if (m_request.endByte >= 0) {
-        const qint64 consumed = m_request.startByte +
-                                m_received.load(std::memory_order_relaxed) +
-                                m_sniffBuf.size();
-        capacity = (m_request.endByte + 1) - consumed;
+    if (self->m_request.endByte >= 0) {
+        const qint64 consumed = self->m_request.startByte +
+                                self->m_received.load(std::memory_order_relaxed) +
+                                self->m_sniffBuf.size();
+        capacity = (self->m_request.endByte + 1) - consumed;
         if (capacity <= 0) {
             return 0; // rango ya completo: corta la transferencia
         }

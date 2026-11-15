@@ -137,9 +137,9 @@ Rectangle {
                         text: model.segmentIndex + 1
                         font.pixelSize: Style.fontSizeSmall
                         font.family: Style.fontMono
-                        color: "#ffffff"
+                        color: Theme.onAccent
                         style: Text.Raised
-                        styleColor: "#66000000"
+                        styleColor: Theme.textShadow
                         visible: parent.width > 22
                     }
                     ToolTip.visible: segMouse.containsMouse

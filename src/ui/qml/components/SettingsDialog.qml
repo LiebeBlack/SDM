@@ -16,6 +16,10 @@ Dialog {
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
+    // Ancho útil del contenido de cada pestaña (descuenta márgenes y barra
+    // de desplazamiento para que ningún control quede cortado).
+    readonly property int contentWidth: width - 2 * Style.padding - 24
+
     enter: Transition {
         NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Style.animNormal; easing.type: Style.easeOut }
         NumberAnimation { property: "scale"; from: 0.95; to: 1; duration: Style.animNormal; easing.type: Style.easeOut }
@@ -26,12 +30,13 @@ Dialog {
 
     title: "Ajustes"
     // Cabecera propia con el título estilizado (Dialog no expone titleItem).
+    // El margen izquierdo coincide con el del contenido para alinear todo.
     header: Item {
         implicitHeight: settingsTitle.implicitHeight + 2 * Style.padding
         Text {
             id: settingsTitle
             anchors.left: parent.left
-            anchors.leftMargin: Style.paddingLarge
+            anchors.leftMargin: Style.padding
             anchors.verticalCenter: parent.verticalCenter
             text: settingsDialog.title
             color: Theme.text
@@ -91,7 +96,7 @@ Dialog {
                 visible: checkRoot.checked
                 text: "✓"
                 font.pixelSize: 12
-                color: "#ffffff"
+                color: Theme.onAccent
                 scale: checkRoot.checked ? 1.0 : 0.5
                 Behavior on scale { NumberAnimation { duration: Style.animFast; easing.type: Style.easeSpring } }
             }
@@ -127,7 +132,7 @@ Dialog {
                     text: modelData
                     font.pixelSize: Style.fontSize
                     font.weight: Font.Medium
-                    color: threadRow.selected === modelData ? "#ffffff" : Theme.text
+                    color: threadRow.selected === modelData ? Theme.onAccent : Theme.text
                 }
                 MouseArea {
                     id: thrMouse
@@ -152,7 +157,7 @@ Dialog {
         TabBar {
             id: tabBar
             Layout.fillWidth: true
-            Layout.margins: 12
+            Layout.margins: Style.padding
             Layout.bottomMargin: 0
             background: Rectangle {
                 color: Theme.bg
@@ -181,20 +186,33 @@ Dialog {
                         color: parent.hovered ? Theme.hover : "transparent"
                         radius: Style.radiusSmall
                         Behavior on color { ColorAnimation { duration: Style.animFast } }
+
+                        // Subrayado de acento de la pestaña activa (animado).
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            height: 2
+                            radius: 1
+                            color: Theme.accent
+                            opacity: tabBar.currentIndex === index ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: Style.animNormal; easing.type: Style.easeOut } }
+                        }
                     }
                 }
             }
         }
 
-        // Indicador de pestaña activa (linea acento animada).
+        // Divisor bajo la barra de pestañas (el acento lo lleva cada pestaña).
         Rectangle {
             Layout.fillWidth: true
-            Layout.leftMargin: 12
-            Layout.rightMargin: 12
+            Layout.leftMargin: Style.padding
+            Layout.rightMargin: Style.padding
             Layout.topMargin: -1
-            height: 2
-            color: Theme.accent
-            radius: 1
+            height: 1
+            color: Theme.border
         }
 
         // ------------------------------------------------------------
@@ -203,14 +221,14 @@ Dialog {
         StackLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.margins: 12
+            Layout.margins: Style.padding
             currentIndex: tabBar.currentIndex
 
             // === GENERAL ===
             ScrollView {
                 clip: true
                 ColumnLayout {
-                    width: settingsDialog.width - 64
+                    width: settingsDialog.contentWidth
                     spacing: 6
 
                     SectionLabel { text: "DESCARGA" }
@@ -291,7 +309,7 @@ Dialog {
             ScrollView {
                 clip: true
                 ColumnLayout {
-                    width: settingsDialog.width - 64
+                    width: settingsDialog.contentWidth
                     spacing: 6
 
                     SectionLabel { text: "CONEXIÓN" }
@@ -331,7 +349,7 @@ Dialog {
             ScrollView {
                 clip: true
                 ColumnLayout {
-                    width: settingsDialog.width - 64
+                    width: settingsDialog.contentWidth
                     spacing: 6
 
                     SectionLabel { text: "HLS / DASH" }
@@ -379,7 +397,7 @@ Dialog {
             ScrollView {
                 clip: true
                 ColumnLayout {
-                    width: settingsDialog.width - 64
+                    width: settingsDialog.contentWidth
                     spacing: 6
 
                     SectionLabel { text: "PUENTE CON EL NAVEGADOR" }
@@ -480,7 +498,7 @@ Dialog {
             ScrollView {
                 clip: true
                 ColumnLayout {
-                    width: settingsDialog.width - 64
+                    width: settingsDialog.contentWidth
                     spacing: 10
 
                     SectionLabel { text: "ACERCA DE" }

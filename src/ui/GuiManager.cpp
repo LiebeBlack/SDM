@@ -277,9 +277,9 @@ void TaskListModel::onTaskUpdated(quint64 id) {
     const bool visibleAfter = matches(updated);
 
     if (visibleBefore && visibleAfter) {
-        const int row = m_visible.indexOf(cacheIndex);
+        const qsizetype row = m_visible.indexOf(cacheIndex);
         if (row >= 0) {
-            const QModelIndex idx = index(row, 0);
+            const QModelIndex idx = index(static_cast<int>(row), 0);
             emit dataChanged(idx, idx);
         }
     } else {

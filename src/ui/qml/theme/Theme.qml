@@ -38,7 +38,12 @@ QtObject {
     readonly property color warning: "#e0b13a"
     readonly property color warningSoft: dark ? "#3a3220" : "#fdf3d7"
     readonly property color danger: "#e74c3c"
+    readonly property color dangerHover: dark ? "#c93b2f" : "#d44637"
     readonly property color dangerSoft: dark ? "#3a2220" : "#fbe3e0"
+    // Texto sobre fondos de acento, éxito, peligro o advertencia.
+    readonly property color onAccent: "#ffffff"
+    // Sombra de texto legible sobre colores dinámicos (barras de segmento).
+    readonly property color textShadow: "#66000000"
     readonly property color info: "#8e7cff"
     readonly property color queued: "#9aa0a6"
     readonly property color expired: "#ff7b3d"

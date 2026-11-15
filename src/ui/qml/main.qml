@@ -396,7 +396,7 @@ ApplicationWindow {
             text: toast.level === 2 ? "✕" : (toast.level === 1 ? "⚠" : "✓")
             font.pixelSize: 15
             font.weight: Font.Bold
-            color: toast.level >= 1 ? "#ffffff" : Theme.accent
+            color: toast.level >= 1 ? Theme.onAccent : Theme.accent
         }
 
         Text {
@@ -408,7 +408,7 @@ ApplicationWindow {
             anchors.verticalCenter: parent.verticalCenter
             text: toast.message
             font.pixelSize: Style.fontSize
-            color: toast.level >= 1 ? "#ffffff" : Theme.text
+            color: toast.level >= 1 ? Theme.onAccent : Theme.text
             wrapMode: Text.Wrap
         }
 

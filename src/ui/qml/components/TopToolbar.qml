@@ -63,7 +63,7 @@ Rectangle {
                     anchors.centerIn: parent
                     text: "⬇"
                     font.pixelSize: 17
-                    color: "#ffffff"
+                    color: Theme.onAccent
                 }
             }
             Text {

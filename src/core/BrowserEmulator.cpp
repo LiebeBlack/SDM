@@ -106,18 +106,18 @@ const QList<QString>& BrowserEmulator::userAgentPool() {
         for (const BrowserProfile& profile : profiles()) {
             list.push_back(profile.userAgent);
         }
-        // Versiones ligeramente anteriores para variabilidad (rotacion).
-        list.push_back(QStringLiteral(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/121.0.0.0 Safari/537.36"));
-        list.push_back(QStringLiteral(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"));
-        list.push_back(QStringLiteral(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0"));
-        list.push_back(QStringLiteral(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0.0.0 Safari/537.36 Edg/122.0.21.2"));
+        // Versiones ligeramente anteriores para variabilidad (rotacion),
+        // compuestas a partir de los prefijos/sufijos de cada motor.
+        const auto chrome = [](const char* major) {
+            return QString::fromLatin1(kChromeUaPrefix) + QLatin1String(major) +
+                   QLatin1String(".") + QString::fromLatin1(kChromeUaSuffix);
+        };
+        list.push_back(chrome("121"));
+        list.push_back(chrome("120"));
+        list.push_back(QString::fromLatin1(kFirefoxUaPrefix) + QStringLiteral("122") +
+                       QString::fromLatin1(kFirefoxUaSuffix) + QStringLiteral("122.0"));
+        list.push_back(QString::fromLatin1(kEdgeUaPrefix) + QStringLiteral("122") +
+                       QString::fromLatin1(kEdgeUaMid) + QStringLiteral("122.0.21.2"));
         return list;
     }();
     return kPool;
@@ -162,17 +162,18 @@ void BrowserEmulator::rotateProfile() {
 
 QString BrowserEmulator::randomUserAgent() {
     const QList<QString>& pool = userAgentPool();
-    const int index = QRandomGenerator::global()->bounded(pool.size());
+    const qsizetype index = QRandomGenerator::global()->bounded(
+        static_cast<quint32>(pool.size()));
     return pool.at(index);
 }
 
 QString BrowserEmulator::chromeVersionString() {
     const BrowserProfile& profile = currentProfile();
-    const int idx = profile.userAgent.indexOf(QLatin1String("Chrome/"));
+    const qsizetype idx = profile.userAgent.indexOf(QLatin1String("Chrome/"));
     if (idx < 0) {
         return QStringLiteral("122.0.0.0");
     }
-    int end = profile.userAgent.indexOf(QLatin1Char(' '), idx);
+    qsizetype end = profile.userAgent.indexOf(QLatin1Char(' '), idx);
     if (end < 0) {
         end = profile.userAgent.size();
     }

@@ -419,7 +419,7 @@ inline QString sanitizeFileName(const QString& name) {
 /// Extensiones que legitiman una respuesta HTML (un .zip no puede ser HTML).
 inline bool isHtmlLikeFileName(const QString& fileName) {
     const QString lower = fileName.toLower();
-    const int dot = lower.lastIndexOf(QLatin1Char('.'));
+    const qsizetype dot = lower.lastIndexOf(QLatin1Char('.'));
     if (dot < 0) {
         return false;
     }
@@ -437,8 +437,8 @@ inline bool looksLikeHtmlDocument(const QByteArray& head) {
     if (s.startsWith("\xEF\xBB\xBF")) {
         s.remove(0, 3); // UTF-8 BOM
     }
-    const int n = s.size();
-    int i = 0;
+    const qsizetype n = s.size();
+    qsizetype i = 0;
     while (i < n) {
         while (i < n && (s.at(i) == ' ' || s.at(i) == '\t' || s.at(i) == '\r' || s.at(i) == '\n')) {
             ++i;
@@ -447,7 +447,7 @@ inline bool looksLikeHtmlDocument(const QByteArray& head) {
             return false; // primer byte no es marcado: binario u otro formato
         }
         if (s.mid(i, 4) == "<!--") {
-            const int end = s.indexOf("-->", i);
+            const qsizetype end = s.indexOf("-->", i);
             if (end < 0) {
                 return false; // comentario sin cerrar: ambiguo, no se bloquea
             }
@@ -455,7 +455,7 @@ inline bool looksLikeHtmlDocument(const QByteArray& head) {
             continue;
         }
         if (i + 1 < n && s.at(i + 1) == '?') {
-            const int end = s.indexOf("?>", i); // prologo <?xml ... ?>
+            const qsizetype end = s.indexOf("?>", i); // prologo <?xml ... ?>
             if (end < 0) {
                 return false;
             }
@@ -466,7 +466,7 @@ inline bool looksLikeHtmlDocument(const QByteArray& head) {
             const QByteArray decl = s.mid(i, 16).toLower();
             return decl.startsWith("<!doctype") && decl.contains("html");
         }
-        int j = i + 1;
+        qsizetype j = i + 1;
         while (j < n && ((s.at(j) >= 'a' && s.at(j) <= 'z') || (s.at(j) >= 'A' && s.at(j) <= 'Z') ||
                          (s.at(j) >= '0' && s.at(j) <= '9'))) {
             ++j;

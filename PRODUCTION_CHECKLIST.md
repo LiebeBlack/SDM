@@ -58,6 +58,7 @@ estar ✅ antes de publicar una versión estable.
 - [ ] HLS/DASH: selección de calidad con timeout automático al mejor variante
 - [ ] Refresco de enlaces caducados (403/401) con reintento vía navegador
 - [ ] Anti-HTML: nunca se guarda una web como archivo (ver §2)
+- [ ] Programación de inicio: varias tareas programadas coexisten y arrancan a su hora; sobreviven al cierre del diálogo
 - [ ] Cambio de hilos, destino, proxy y tema en caliente
 - [ ] Instancia única: segundo arranque eleva la ventana existente
 - [ ] Modo `--minimized` y CLI (`--port`, `--dir`)
@@ -65,11 +66,13 @@ estar ✅ antes de publicar una versión estable.
 ## 7. UX y accesibilidad
 
 - [ ] Tema oscuro/claro completos sin colores hard-coded fuera de `Theme.qml`
-- [ ] Animaciones con `Behavior`/`Transition` coherentes (120–320 ms, `OutCubic`)
-- [ ] Atajos documentados: Ctrl+N, Ctrl+O, Ctrl+,, Ctrl+Delete, Ctrl+Shift+P/R
-- [ ] Estados vacíos, de error y de carga con mensajes accionables
+- [x] Animaciones con `Behavior`/`Transition` coherentes (120–320 ms, `OutCubic`); tipo de animación coincidente con el tipo de propiedad en todos los `Behavior`
+- [x] Atajos documentados: Ctrl+N, Ctrl+O, Ctrl+,, Ctrl+Delete, Ctrl+Shift+P/R
+- [x] Estados vacíos, de error y de carga con mensajes accionables
 - [ ] Texto legible a 100/150/200 % de escala del sistema
-- [ ] Tooltips en todas las acciones de la barra y la tabla
+- [x] Tooltips en todas las acciones de la barra y la tabla
+- [x] API QML verificada contra la documentación oficial de Qt 6: sin tipos/propiedades inexistentes (`Dialog.titleItem`, `TimeEdit`, `FolderDialog.selectedFolder`), sin invocaciones no invocables (`rowCount` desde QML) y con `qmldir` de singletons registrado en `resources.qrc`
+- [x] Diálogos alineados con design tokens (cabecera/pie/contenido con `Style.padding*`; sin márgenes mágicos) y programación de inicio con cola múltiple (varias tareas programadas coexisten)
 
 ## 8. Observabilidad y soporte
 

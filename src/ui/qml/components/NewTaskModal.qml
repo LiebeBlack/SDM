@@ -51,6 +51,12 @@ Dialog {
         scheduleCheck.checked = false
         errorLabel.visible = false
         streamMode = false
+        // Las tareas ya programadas conservan su cola de inicio pendiente;
+        // solo se restablece el formulario para la nueva captura.
+        scheduledTaskId = 0
+        var now = new Date()
+        hourBox.value = now.getHours()
+        minuteBox.value = now.getMinutes()
         open()
         urlField.forceActiveFocus()
     }
@@ -84,23 +90,65 @@ Dialog {
 
         if (scheduleCheck.checked && scheduledTaskId > 0) {
             // Programacion de inicio: se crea en cola y se arranca a la hora.
+            // Cada tarea programada entra en la cola pendiente; el temporizador
+            // siempre despierta en la más próxima, así varias programaciones
+            // coexisten sin pisarse.
             var now = new Date()
             var target = new Date()
             target.setHours(timeEdit.hours(), timeEdit.minutes(), 0, 0)
             if (target <= now) {
                 target.setDate(target.getDate() + 1)
             }
-            var delta = target.getTime() - now.getTime()
-            scheduleTimer.interval = Math.min(delta, 2147483000)
-            scheduleTimer.start()
+            queueStart(scheduledTaskId, target.getTime())
         }
         modal.close()
+    }
+
+    // --- Cola de inicios programados { id, atMs } ---
+    property var pendingStarts: []
+
+    function queueStart(taskId, atMs) {
+        var list = pendingStarts.slice()
+        list.push({ id: taskId, at: atMs })
+        pendingStarts = list
+        armScheduleTimer()
+    }
+
+    function armScheduleTimer() {
+        if (pendingStarts.length === 0) {
+            scheduleTimer.stop()
+            return
+        }
+        var soonest = pendingStarts[0].at
+        for (var i = 1; i < pendingStarts.length; ++i) {
+            if (pendingStarts[i].at < soonest) {
+                soonest = pendingStarts[i].at
+            }
+        }
+        var delta = Math.max(0, soonest - Date.now())
+        // Qt Timer admite intervalos <= 2^31-1 ms; para esperas mayores se
+        // rearma por tramos sin perder la programación.
+        scheduleTimer.interval = Math.min(delta, 2147483000)
+        scheduleTimer.start()
     }
 
     Timer {
         id: scheduleTimer
         repeat: false
-        onTriggered: bridge.resumeTask(modal.scheduledTaskId)
+        onTriggered: {
+            var nowMs = Date.now()
+            var remaining = []
+            for (var i = 0; i < modal.pendingStarts.length; ++i) {
+                var entry = modal.pendingStarts[i]
+                if (entry.at <= nowMs) {
+                    bridge.resumeTask(entry.id)
+                } else {
+                    remaining.push(entry)
+                }
+            }
+            modal.pendingStarts = remaining
+            modal.armScheduleTimer()
+        }
     }
 
     modal: true
@@ -244,7 +292,7 @@ Dialog {
                             text: modelData + (modelData === 1 ? " hilo" : " hilos")
                             font.pixelSize: Style.fontSize
                             font.weight: Font.Medium
-                            color: threadsRow.selectedThreads === modelData ? "#ffffff" : Theme.text
+                            color: threadsRow.selectedThreads === modelData ? Theme.onAccent : Theme.text
                         }
                         MouseArea {
                             id: thrMouse

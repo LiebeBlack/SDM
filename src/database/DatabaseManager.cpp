@@ -156,7 +156,7 @@ QMap<QString, QString> deserializeHeaders(const QString& text) {
         if (line.isEmpty()) {
             continue;
         }
-        const int eq = line.indexOf(QLatin1Char('='));
+        const qsizetype eq = line.indexOf(QLatin1Char('='));
         if (eq <= 0) {
             continue;
         }

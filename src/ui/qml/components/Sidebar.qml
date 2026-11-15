@@ -96,7 +96,7 @@ Rectangle {
                     text: navRow.count
                     font.pixelSize: Style.fontSizeTiny
                     font.family: Style.fontMono
-                    color: navRow.selected ? "#ffffff" : Theme.subtleText
+                    color: navRow.selected ? Theme.onAccent : Theme.subtleText
                 }
             }
         }
