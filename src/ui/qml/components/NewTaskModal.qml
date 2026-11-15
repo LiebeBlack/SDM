@@ -86,7 +86,7 @@ Dialog {
             // Programacion de inicio: se crea en cola y se arranca a la hora.
             var now = new Date()
             var target = new Date()
-            target.setHours(timeEdit.hours, timeEdit.minutes, 0, 0)
+            target.setHours(timeEdit.hours(), timeEdit.minutes(), 0, 0)
             if (target <= now) {
                 target.setDate(target.getDate() + 1)
             }
@@ -120,8 +120,20 @@ Dialog {
     }
 
     title: streamMode ? "Nueva descarga multimedia" : "Nueva descarga"
-    titleItem.color: Theme.text
-    titleItem.font.pixelSize: Style.fontSizeTitle
+    // Cabecera propia con el título estilizado (Dialog no expone titleItem).
+    header: Item {
+        implicitHeight: modalTitle.implicitHeight + 2 * Style.padding
+        Text {
+            id: modalTitle
+            anchors.left: parent.left
+            anchors.leftMargin: Style.paddingLarge
+            anchors.verticalCenter: parent.verticalCenter
+            text: modal.title
+            color: Theme.text
+            font.pixelSize: Style.fontSizeTitle
+            font.weight: Font.DemiBold
+        }
+    }
 
     background: Rectangle {
         color: Theme.surface
@@ -132,7 +144,7 @@ Dialog {
     Platforms.FolderDialog {
         id: folderDialog
         title: "Selecciona la carpeta de destino"
-        onAccepted: folderField.text = modal.urlToLocal(selectedFolder)
+        onAccepted: folderField.text = modal.urlToLocal(folderDialog.folder)
     }
 
     contentItem: ColumnLayout {
@@ -292,31 +304,110 @@ Dialog {
             CheckBox {
                 id: holdCheck
                 text: "No iniciar aún (dejar en cola)"
-                contentItem: Text {
-                    text: holdCheck.text
-                    font.pixelSize: Style.fontSize
-                    color: Theme.text
-                    leftPadding: holdCheck.indicator.width + 8
-                    verticalAlignment: Text.AlignVCenter
+                contentItem: Item {
+                    implicitWidth: holdLabel.implicitWidth + holdCheck.indicator.width + 8
+                    implicitHeight: holdLabel.implicitHeight
+                    Text {
+                        id: holdLabel
+                        anchors.left: parent.left
+                        anchors.leftMargin: holdCheck.indicator.width + 8
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: holdCheck.text
+                        font.pixelSize: Style.fontSize
+                        color: Theme.text
+                        elide: Text.ElideRight
+                    }
                 }
             }
 
             CheckBox {
                 id: scheduleCheck
                 text: "Programar inicio:"
-                contentItem: Text {
-                    text: scheduleCheck.text
-                    font.pixelSize: Style.fontSize
-                    color: Theme.text
-                    leftPadding: scheduleCheck.indicator.width + 8
-                    verticalAlignment: Text.AlignVCenter
+                contentItem: Item {
+                    implicitWidth: scheduleLabel.implicitWidth + scheduleCheck.indicator.width + 8
+                    implicitHeight: scheduleLabel.implicitHeight
+                    Text {
+                        id: scheduleLabel
+                        anchors.left: parent.left
+                        anchors.leftMargin: scheduleCheck.indicator.width + 8
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: scheduleCheck.text
+                        font.pixelSize: Style.fontSize
+                        color: Theme.text
+                        elide: Text.ElideRight
+                    }
                 }
             }
-            TimeEdit {
+            // Selector de hora programada (HH:MM) con dos campos numéricos.
+            RowLayout {
                 id: timeEdit
+                spacing: 4
                 enabled: scheduleCheck.checked
-                editable: true
-                font.pixelSize: Style.fontSize
+
+                function hours() { return hourBox.value }
+                function minutes() { return minuteBox.value }
+
+                component TimeBox: SpinBox {
+                    id: box
+                    editable: true
+                    font.pixelSize: Style.fontSize
+                    font.family: Style.fontMono
+                    leftPadding: 22
+                    rightPadding: 22
+                    background: Rectangle {
+                        color: Theme.bg
+                        radius: Style.radiusSmall
+                        border.color: box.activeFocus ? Theme.accent : Theme.border
+                        Behavior on border.color { ColorAnimation { duration: Style.animFast } }
+                    }
+                    contentItem: TextInput {
+                        text: box.textFromValue(box.value, box.locale)
+                        font: box.font
+                        color: Theme.text
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        readOnly: !box.editable
+                        validator: box.validator
+                        inputMethodHints: box.inputMethodHints
+                        selectByMouse: true
+                        onTextEdited: box.value = box.valueFromText(text, box.locale)
+                    }
+                    up.indicator: Text {
+                        x: box.width - width - 4
+                        y: 2
+                        text: "▲"
+                        font.pixelSize: 7
+                        color: box.up.hovered ? Theme.accent : Theme.subtleText
+                    }
+                    down.indicator: Text {
+                        x: box.width - width - 4
+                        y: box.height - height - 2
+                        text: "▼"
+                        font.pixelSize: 7
+                        color: box.down.hovered ? Theme.accent : Theme.subtleText
+                    }
+                }
+
+                TimeBox {
+                    id: hourBox
+                    from: 0
+                    to: 23
+                    Layout.preferredWidth: 64
+                }
+                Text {
+                    text: ":"
+                    font.pixelSize: Style.fontSizeTitle
+                    font.family: Style.fontMono
+                    color: Theme.text
+                }
+                TimeBox {
+                    id: minuteBox
+                    from: 0
+                    to: 59
+                    Layout.preferredWidth: 64
+                }
             }
             Item { Layout.fillWidth: true }
         }

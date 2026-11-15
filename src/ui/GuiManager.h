@@ -131,6 +131,8 @@ public:
 
     Q_INVOKABLE void setTask(quint64 id);
     Q_INVOKABLE void clear();
+    /// Número de segmentos expuesto a QML (rowCount no es invocable).
+    Q_INVOKABLE int count() const { return static_cast<int>(m_segments.size()); }
     quint64 currentTask() const { return m_taskId; }
 
 public slots:

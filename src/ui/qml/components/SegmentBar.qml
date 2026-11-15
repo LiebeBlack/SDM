@@ -27,10 +27,10 @@ Rectangle {
     function refresh() {
         if (taskId && taskId > 0) {
             info = bridge.taskInfo(taskId)
-            segmentCount = segmentsModel.rowCount()
+            segmentCount = segmentsModel.count()
         } else {
             info = ({})
-            segmentCount = segmentsModel.rowCount()
+            segmentCount = segmentsModel.count()
         }
     }
 

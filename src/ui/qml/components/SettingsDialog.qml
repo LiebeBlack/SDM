@@ -25,8 +25,20 @@ Dialog {
     }
 
     title: "Ajustes"
-    titleItem.color: Theme.text
-    titleItem.font.pixelSize: Style.fontSizeTitle
+    // Cabecera propia con el título estilizado (Dialog no expone titleItem).
+    header: Item {
+        implicitHeight: settingsTitle.implicitHeight + 2 * Style.padding
+        Text {
+            id: settingsTitle
+            anchors.left: parent.left
+            anchors.leftMargin: Style.paddingLarge
+            anchors.verticalCenter: parent.verticalCenter
+            text: settingsDialog.title
+            color: Theme.text
+            font.pixelSize: Style.fontSizeTitle
+            font.weight: Font.DemiBold
+        }
+    }
 
     background: Rectangle {
         color: Theme.surface
@@ -214,7 +226,10 @@ Dialog {
                         }
                         SdmToolButton {
                             label: "Restaurar"
-                            onClicked: dirField.text = bridge.suggestedFolder()
+                            onClicked: {
+                                dirField.text = bridge.suggestedFolder()
+                                bridge.downloadDir = dirField.text
+                            }
                         }
                     }
 
@@ -563,15 +578,21 @@ Dialog {
         }
     }
 
-    footer: RowLayout {
-        Layout.margins: Style.padding
-        spacing: Style.spacing
+    footer: Item {
+        implicitHeight: settingsFooter.implicitHeight + 2 * Style.padding
 
-        Item { Layout.fillWidth: true }
-        SdmToolButton {
-            label: "Cerrar"
-            accent: true
-            onClicked: settingsDialog.close()
+        RowLayout {
+            id: settingsFooter
+            anchors.fill: parent
+            anchors.margins: Style.padding
+            spacing: Style.spacing
+
+            Item { Layout.fillWidth: true }
+            SdmToolButton {
+                label: "Cerrar"
+                accent: true
+                onClicked: settingsDialog.close()
+            }
         }
     }
 }

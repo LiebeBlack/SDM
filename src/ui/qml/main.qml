@@ -234,8 +234,20 @@ ApplicationWindow {
         }
 
         title: "Seleccionar calidad"
-        titleItem.color: Theme.text
-        titleItem.font.pixelSize: Style.fontSizeTitle
+        // Cabecera propia con el título estilizado (Dialog no expone titleItem).
+        header: Item {
+            implicitHeight: variantsTitle.implicitHeight + 2 * Style.padding
+            Text {
+                id: variantsTitle
+                anchors.left: parent.left
+                anchors.leftMargin: Style.paddingLarge
+                anchors.verticalCenter: parent.verticalCenter
+                text: variantsDialog.title
+                color: Theme.text
+                font.pixelSize: Style.fontSizeTitle
+                font.weight: Font.DemiBold
+            }
+        }
 
         background: Rectangle {
             color: Theme.surface
@@ -326,14 +338,21 @@ ApplicationWindow {
             }
         }
 
-        footer: RowLayout {
-            spacing: Style.spacing
-            Item { Layout.fillWidth: true }
-            SdmToolButton {
-                label: "Cancelar"
-                onClicked: {
-                    bridge.cancelStreamTask(variantsDialog.taskId)
-                    variantsDialog.close()
+        footer: Item {
+            implicitHeight: variantsFooter.implicitHeight + 2 * Style.padding
+
+            RowLayout {
+                id: variantsFooter
+                anchors.fill: parent
+                anchors.margins: Style.padding
+                spacing: Style.spacing
+                Item { Layout.fillWidth: true }
+                SdmToolButton {
+                    label: "Cancelar"
+                    onClicked: {
+                        bridge.cancelStreamTask(variantsDialog.taskId)
+                        variantsDialog.close()
+                    }
                 }
             }
         }

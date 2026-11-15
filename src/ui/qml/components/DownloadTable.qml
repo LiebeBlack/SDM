@@ -398,8 +398,20 @@ Rectangle {
         }
 
         title: "Eliminar descarga"
-        titleItem.color: Theme.text
-        titleItem.font.pixelSize: Style.fontSizeTitle
+        // Cabecera propia con el título estilizado (Dialog no expone titleItem).
+        header: Item {
+            implicitHeight: deleteTitle.implicitHeight + 2 * Style.padding
+            Text {
+                id: deleteTitle
+                anchors.left: parent.left
+                anchors.leftMargin: Style.paddingLarge
+                anchors.verticalCenter: parent.verticalCenter
+                text: deleteDialog.title
+                color: Theme.text
+                font.pixelSize: Style.fontSizeTitle
+                font.weight: Font.DemiBold
+            }
+        }
 
         ColumnLayout {
             width: parent.width
@@ -424,12 +436,20 @@ Rectangle {
                 id: deleteFileCheck
                 text: "Eliminar también el archivo"
                 checked: false
-                contentItem: Text {
-                    text: deleteFileCheck.text
-                    color: Theme.text
-                    font.pixelSize: Style.fontSize
-                    leftPadding: deleteFileCheck.indicator.width + 6
-                    verticalAlignment: Text.AlignVCenter
+                contentItem: Item {
+                    implicitWidth: deleteFileLabel.implicitWidth + deleteFileCheck.indicator.width + 6
+                    implicitHeight: deleteFileLabel.implicitHeight
+                    Text {
+                        id: deleteFileLabel
+                        anchors.left: parent.left
+                        anchors.leftMargin: deleteFileCheck.indicator.width + 6
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: deleteFileCheck.text
+                        color: Theme.text
+                        font.pixelSize: Style.fontSize
+                        elide: Text.ElideRight
+                    }
                 }
             }
 
@@ -463,7 +483,7 @@ Rectangle {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            tasksModel.removeAt(tasksModel.rowForTask(deleteDialog.taskId), deleteFileCheck.checked)
+                            bridge.removeTask(deleteDialog.taskId, deleteFileCheck.checked)
                             deleteDialog.close()
                         }
                     }
