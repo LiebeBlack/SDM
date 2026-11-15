@@ -703,10 +703,10 @@ quint64 DownloadEngine::addTask(const NewTaskRequest& request) {
     task.receivedBytes = 0;
 
     const QUrl validatedUrl(task.url);
-    const QString scheme = validatedUrl.scheme().toLower();
+    const QString validatedScheme = validatedUrl.scheme().toLower();
     if (!validatedUrl.isValid() || validatedUrl.host().isEmpty() ||
-        (scheme != QLatin1String("http") && scheme != QLatin1String("https") &&
-         scheme != QLatin1String("ftp")) ||
+        (validatedScheme != QLatin1String("http") && validatedScheme != QLatin1String("https") &&
+         validatedScheme != QLatin1String("ftp")) ||
         task.fileName.isEmpty() || task.fileName == QLatin1String(".") ||
         task.fileName == QLatin1String("..")) {
         return 0;

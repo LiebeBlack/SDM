@@ -641,6 +641,9 @@ QList<StreamVariant> StreamDownloader::parseDashManifest(const QString& xml, con
                 const QString durationAttr = reader.attributes().value(QLatin1String("duration")).toString();
                 const QString timescaleAttr = reader.attributes().value(QLatin1String("timescale")).toString();
                 const QString startAttr = reader.attributes().value(QLatin1String("startNumber")).toString();
+                bool okDuration = false;
+                bool okTimescale = false;
+                bool okStart = false;
                 if (!durationAttr.isEmpty()) {
                     const qint64 value = durationAttr.toLongLong(&okDuration);
                     if (!okDuration || value <= 0) {
