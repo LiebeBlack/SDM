@@ -21,11 +21,11 @@ namespace {
 // ---------------------------------------------------------------------------
 
 void bindText(sqlite3_stmt* stmt, int index, const QString& value) {
-    if (value.isNull()) {
-        sqlite3_bind_null(stmt, index);
-        return;
-    }
-    sqlite3_bind_text16(stmt, index, value.utf16(), -1, SQLITE_TRANSIENT);
+    // Todas las columnas TEXT del esquema son NOT NULL DEFAULT '': un QString
+    // nulo se persiste como cadena vacia (no SQL NULL) para respetar el
+    // esquema y la semantica "vacio = sin valor" (p. ej. updateUrl).
+    const QString text = value.isNull() ? QStringLiteral("") : value;
+    sqlite3_bind_text16(stmt, index, text.utf16(), -1, SQLITE_TRANSIENT);
 }
 
 void bindInt(sqlite3_stmt* stmt, int index, qint64 value) {
