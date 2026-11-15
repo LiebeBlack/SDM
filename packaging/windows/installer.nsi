@@ -16,7 +16,9 @@
 ; ============================================================================
 
 Unicode true
-XPManifestLevel 10
+; Declaracion de compatibilidad en el manifiesto del instalador (Win10/11 usa
+; el GUID de Win10). Equivale a los supportedOS de packaging/windows/app.manifest.
+ManifestSupportedOS Win8.1 Win10
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
