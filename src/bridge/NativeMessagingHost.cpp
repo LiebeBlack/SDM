@@ -27,6 +27,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QWebSocket>
+#include <QWebSocketProtocol>
 
 #include <algorithm>
 #include <atomic>
@@ -272,7 +273,7 @@ bool NativeMessagingHost::start(const QString& bridgeInfoPath, QString* error) {
         return false;
     }
 
-    m_socket = new QWebSocket(QStringLiteral("SDM Native Host"), QWebSocket::Client, this);
+    m_socket = new QWebSocket(QStringLiteral("sdm://native-host"), QWebSocketProtocol::VersionLatest, this);
     m_socket->setMaxAllowedIncomingFrameSize(1024 * 1024);
     connect(m_socket, &QWebSocket::connected, this, &NativeMessagingHost::onConnected);
     connect(m_socket, &QWebSocket::disconnected, this, &NativeMessagingHost::onDisconnected);
