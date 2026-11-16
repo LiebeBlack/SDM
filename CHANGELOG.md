@@ -4,6 +4,77 @@ Todos los cambios notables de este proyecto se documentan aquí.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el
 proyecto usa [versionado semántico](https://semver.org/lang/es/).
 
+## [No publicado]
+
+### Añadido
+
+**Conexión automática software ↔ extensión (cero configuración)**
+- `src/bridge/NativeBridgeRegistrar`: SDM detecta el ID de la extensión leyendo
+  los perfiles de los navegadores Chromium (`extensions.settings`) y registra el
+  puente nativo `com.sdm.bridge` en Chrome, Chromium, Edge, Brave, Vivaldi y
+  Opera (HKCU en Windows, `NativeMessagingHosts` en Linux). Reintenta cada
+  minuto hasta encontrarla, así que también funciona si la extensión se carga
+  después de arrancar SDM.
+- Firefox queda registrado sin descubrimiento: el paquete declara el id fijo
+  `sdm@sdm.local` (`browser_specific_settings.gecko.id`).
+- El instalador ya no pregunta el ID de la extensión (se eliminó la página
+  personalizada); deja `allowed_origins` vacío y SDM lo rellena solo.
+- La extensión recibe `puerto:token` del WebSocket local a través de
+  `getBridgeInfo`, de modo que el canal de respaldo también se configura solo.
+- `SDMNativeHost` arranca SDM (`--minimized`) si el navegador lo lanza y el
+  gestor no está en ejecución.
+
+**Botón flotante junto al reproductor**
+- El botón se ancla al `<video>` visible (esquina superior derecha del
+  reproductor), se recoloca con scroll/redimensionado y cae a la esquina
+  inferior derecha cuando la detección viene de la red y no hay reproductor.
+- UI en Shadow DOM: el CSS de la web no puede romperla ni ocultarla.
+
+**Empaquetado**
+- `scripts/package_extension.py` genera también
+  `dist/sdm-extension-firefox-<ver>.zip` (MV3 con event page) listo para AMO.
+
+### Añadido (paridad con IDM)
+
+- **Descargas por lote con patrón** (`Models.h::expandBatchPattern`):
+  `archivo[01-10].zip`, `[1,3,7]`, `[a-z]`, `[0-100:10]` y varios grupos por URL,
+  con tope de 2000 URLs por patrón. Se intercepta en `GuiManager::addTask`, así
+  que funciona desde la UI, el puente y la CLI. Cubierto por 5 tests nuevos.
+- **Límite de velocidad por tarea** (`EngineSettings::speedLimitKbps`, 0 = sin
+  límite): se reparte entre las conexiones activas de cada tarea y se aplica con
+  `CURLOPT_MAX_RECV_SPEED_LARGE` en cada segmento. Control en Ajustes → «Límite
+  de velocidad».
+- **Monitor de portapapeles** (Ajustes → «Añadir enlaces copiados al
+  portapapeles»): al copiar una URL http/https/ftp se encola sola.
+- **CLI `--url` / `-u`**: `SDM --url "<enlace>"` añade la descarga; si ya hay una
+  instancia abierta se la reenvía por `QLocalServer` (también admite lotes).
+- **Panel «Medios detectados» en el popup** (estilo media grabber de IDM): lista
+  todas las transmisiones/vídeos de la página con botón de descarga individual.
+- **Detección de duplicados** (`DownloadEngine::findDuplicateTask`): repetir una
+  URL ya activa devuelve la tarea existente en vez de duplicarla (la comparación
+  normaliza esquema, host y fragmento). Las tareas completadas o fallidas sí se
+  pueden repetir.
+- **Organización automática por tipo** (`organizeByCategory`): guarda en
+  `Vídeos/`, `Música/`, `Comprimidos/`, `Documentos/`, `Programas/`, `Imágenes/`
+  u `Otros/` cuando la tarea usa la carpeta por defecto.
+- **Apagar el equipo al terminar la cola** (`shutdownWhenDone`): vigila el fin de
+  la cola y programa `shutdown /s /t 60` (Windows) o `systemctl poweroff`
+  (Linux), con margen de cancelación.
+- **Comprobación de actualizaciones**: consulta
+  `api.github.com/repos/LiebeBlack/SDM/releases/latest` 20 s después de arrancar,
+  compara versiones (`compareVersions`) y avisa; botones «Buscar
+  actualizaciones» y «Descargar novedad» en Ajustes → Acerca de.
+
+### Corregido
+- `service_worker.js` llamaba a `sendHello()`, que no existía: la excepción se
+  tragaba el `try/catch` de `connectNative()` y el canal nativo se descartaba
+  siempre (por eso hacía falta configurar el token a mano).
+- El manifiesto nativo que escribía la app se llamaba `com.sdm.nativehost`
+  (distinto del `com.sdm.bridge` que usa la extensión) y se guardaba en una ruta
+  que ningún navegador lee.
+- El canal nativo deshabilitado ya no deja el WebSocket sin intentar: el
+  fallback se abre de inmediato y el nativo se reintenta cada 30 s.
+
 ## [1.0.0] - 2025-01-01
 
 Primera versión de producción del gestor de descargas S-Download Manager (SDM).

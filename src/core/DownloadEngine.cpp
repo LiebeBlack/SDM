@@ -662,6 +662,23 @@ QVariantMap DownloadEngine::snapshot(const DownloadTask& task) {
 // Alta de tareas
 // ---------------------------------------------------------------------------
 
+quint64 DownloadEngine::findDuplicateTask(const QString& url) const {
+    const QString wanted = normalizeUrlForCompare(url);
+    if (wanted.isEmpty()) {
+        return 0;
+    }
+    const QList<DownloadTask> tasks = allTasks();
+    for (const DownloadTask& task : tasks) {
+        if (task.state == DownloadState::Completed || task.state == DownloadState::Failed) {
+            continue; // terminadas: se permite volver a descargar
+        }
+        if (normalizeUrlForCompare(task.url) == wanted) {
+            return task.id;
+        }
+    }
+    return 0;
+}
+
 quint64 DownloadEngine::addTask(const NewTaskRequest& request) {
     if (!m_initialized) {
         return 0;
@@ -680,19 +697,35 @@ quint64 DownloadEngine::addTask(const NewTaskRequest& request) {
         return 0;
     }
 
+    if (m_settings.skipDuplicateTasks) {
+        const quint64 existing = findDuplicateTask(url);
+        if (existing != 0) {
+            log::info("Alta ignorada: la URL ya esta en la tarea {}",
+                      static_cast<unsigned long long>(existing));
+            emit toast(QStringLiteral("Esa descarga ya existe (tarea %1)").arg(existing), 1);
+            return existing;
+        }
+    }
+
     DownloadTask task;
     task.url = url;
     task.originUrl = request.originUrl.isEmpty() ? request.referer : request.originUrl;
     task.referer = request.referer;
     task.cookies = request.cookies;
     task.userAgent = request.userAgent;
-    task.destDir = request.destDir.isEmpty() ? m_settings.downloadDir : request.destDir;
     task.fileName = request.fileName.isEmpty() ? sanitizeFileName(fileNameFromUrl(url))
                                                 : sanitizeFileName(request.fileName);
     task.httpUser = request.httpUser;
     task.httpPass = request.httpPass;
     task.extraHeaders = request.extraHeaders;
     task.category = categoryForFileName(task.fileName);
+    // Destino: carpeta base + subcarpeta por categoria si el usuario lo activo.
+    // Solo se organiza cuando la tarea usa la carpeta por defecto: si el usuario
+    // eligio una carpeta concreta se respeta tal cual.
+    const QString baseDir = request.destDir.isEmpty() ? m_settings.downloadDir : request.destDir;
+    task.destDir = (m_settings.organizeByCategory && request.destDir.isEmpty())
+                       ? baseDir + QLatin1Char('/') + categoryText(task.category)
+                       : baseDir;
     task.state = DownloadState::Queued;
     task.threadCount = normalizeThreadCount(request.threadCount > 0 ? request.threadCount
                                                                     : m_settings.defaultThreads);
@@ -1492,6 +1525,12 @@ void DownloadEngine::spawnSegment(quint64 id, const SegmentInfo& segment) {
     request.maxRetries = m_settings.maxRetries;
     request.connectTimeoutSec = std::clamp(m_settings.connectTimeoutSec, 1, 120);
     request.totalTimeoutSec = std::clamp(m_settings.totalTimeoutSec, request.connectTimeoutSec, 24 * 60 * 60);
+    // Limite de velocidad por tarea repartido entre sus conexiones (estilo IDM).
+    const qint64 taskLimit = static_cast<qint64>(m_settings.speedLimitKbps) * 1024;
+    if (taskLimit > 0) {
+        const int connections = std::max(1, task->threadCount);
+        request.maxBytesPerSec = std::max<qint64>(1, taskLimit / connections);
+    }
 
     auto* worker = new SegmentWorker(request, runtime->io);
     auto* thread = new QThread();

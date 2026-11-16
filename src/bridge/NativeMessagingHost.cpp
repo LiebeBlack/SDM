@@ -19,10 +19,13 @@
 #include <QAbstractSocket>
 #include <QCoreApplication>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaObject>
+#include <QProcess>
 #include <QStandardPaths>
+#include <QThread>
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
@@ -237,22 +240,59 @@ NativeMessagingHost::~NativeMessagingHost() {
     }
 }
 
+bool NativeMessagingHost::launchSdm(const char* reason) {
+    static bool attempted = false;
+    if (attempted) {
+        return false;
+    }
+    attempted = true;
+#ifdef _WIN32
+    const QString executable =
+        QCoreApplication::applicationDirPath() + QStringLiteral("/SDM.exe");
+#else
+    const QString executable =
+        QCoreApplication::applicationDirPath() + QStringLiteral("/SDM");
+#endif
+    if (!QFileInfo::exists(executable)) {
+        std::fprintf(stderr, "SDMNativeHost: %s; no se encontro %s\n", reason,
+                     executable.toUtf8().constData());
+        return false;
+    }
+    const bool started = QProcess::startDetached(executable, {QStringLiteral("--minimized")});
+    std::fprintf(stderr, "SDMNativeHost: %s; lanzando SDM%s\n", reason,
+                 started ? "" : " (fallo)");
+    return started;
+}
+
 bool NativeMessagingHost::start(const QString& bridgeInfoPath, QString* error) {
     g_running.store(true, std::memory_order_relaxed);
     m_exiting = false;
+
+    // Si SDM no esta en ejecucion el navegador ya nos ha lanzado: se arranca el
+    // gestor (minimizado) para que la captura funcione sin pasos manuales.
     QFile infoFile(bridgeInfoPath);
-    if (!infoFile.open(QIODevice::ReadOnly)) {
-        if (error != nullptr) {
-            *error = QStringLiteral("No se encontró bridge.json (%1). ¿Esta SDM en ejecucion?")
-                         .arg(bridgeInfoPath);
+    QJsonDocument doc;
+    const auto readBridge = [&infoFile, &doc]() -> bool {
+        if (!infoFile.isOpen() && !infoFile.open(QIODevice::ReadOnly)) {
+            return false;
         }
-        return false;
+        const QByteArray raw = infoFile.readAll();
+        infoFile.close();
+        doc = QJsonDocument::fromJson(raw);
+        return doc.isObject();
+    };
+
+    if (!readBridge() && launchSdm("SDM no estaba en ejecucion")) {
+        // Espera acotada (6 s) a que SDM escriba el puente recien arrancado.
+        for (int attempt = 0; attempt < 15 && !readBridge(); ++attempt) {
+            QThread::msleep(400);
+        }
     }
-    const QJsonDocument doc = QJsonDocument::fromJson(infoFile.readAll());
-    infoFile.close();
     if (!doc.isObject()) {
         if (error != nullptr) {
-            *error = QStringLiteral("bridge.json corrupto");
+            *error = QStringLiteral(
+                         "No se pudo leer el puente de SDM (%1). ¿Esta SDM instalado y en ejecucion?")
+                         .arg(bridgeInfoPath);
         }
         return false;
     }
@@ -280,8 +320,10 @@ bool NativeMessagingHost::start(const QString& bridgeInfoPath, QString* error) {
     connect(m_socket, &QWebSocket::textMessageReceived, this, &NativeMessagingHost::onTextMessage);
     connect(m_socket, &QWebSocket::errorOccurred, this,
             [this](QAbstractSocket::SocketError) {
-                // Fallo de conexion (SDM aun no disponible): backoff exponencial.
+                // Fallo de conexion (SDM aun no disponible): arrancarlo una vez
+                // y reintentar con backoff exponencial.
                 if (!m_wsConnected && !m_exiting) {
+                    launchSdm("puerto del puente cerrado");
                     scheduleReconnect();
                 }
             });

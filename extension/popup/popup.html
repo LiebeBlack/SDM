@@ -44,7 +44,8 @@
     </section>
 
     <section class="card">
-      <h2>Captura de página</h2>
+      <h2>Medios detectados</h2>
+      <ul id="media-list" class="blocked-list"></ul>
       <button id="capture-media" class="secondary">⬇ Capturar vídeo/transmisión detectado</button>
       <button id="capture-links" class="secondary">⬇ Descargar todos los enlaces</button>
       <p id="capture-feedback" class="feedback"></p>
@@ -87,8 +88,9 @@
 
     <section class="card">
       <h2>Puente local</h2>
-      <p class="hint">Clave de conexión <code>puerto:token</code> del panel de SDM
-        (Ajustes → Puente). El canal nativo se usa si está instalado.</p>
+      <p class="hint">La conexión es <strong>automática</strong>: SDM y la extensión se
+        descubren solas a través del puente nativo. El campo solo existe como
+        rescate manual (<code>puerto:token</code> de Ajustes → Puente).</p>
       <div class="blocked-row">
         <input type="text" id="key-input" placeholder="9010:abcdef..." />
         <button id="key-save" class="secondary">Guardar</button>

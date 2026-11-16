@@ -27,7 +27,7 @@ estar ✅ antes de publicar una versión estable.
 
 - [x] Token del puente WebSocket: ≥16 bytes aleatorios (CSPRNG), solo `127.0.0.1`, validado en cada mensaje, comparación en tiempo constante
 - [x] Contrapresión del puente: frames ≤ 1 MiB, handshake con timeout de 5 s y tope de conexiones sin autenticar
-- [ ] `com.sdm.bridge` / `com.sdm.nativehost`: `allowed_origins` con ID de extensión real (nunca placeholder en instalador)
+- [x] `com.sdm.bridge`: el ID se detecta automáticamente de los perfiles del navegador (`src/bridge/NativeBridgeRegistrar.cpp`); nunca hay placeholder. Firefox usa el id fijo `sdm@sdm.local`
 - [ ] Sin ejecución de binarios de rutas de usuario en `ffmpegPath`/`ytDlpPath` sin confirmación
 - [ ] Validación de URL (solo http/https/ftp) y sanitización de nombres de archivo (traversal `../`, caracteres reservados Windows)
 - [ ] TLS ≥ 1.2 forzado; verificación de certificado activa (`CURLOPT_SSL_VERIFYPEER`)

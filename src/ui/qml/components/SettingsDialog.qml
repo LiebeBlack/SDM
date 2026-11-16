@@ -273,6 +273,27 @@ Dialog {
                         Item { Layout.fillWidth: true }
                     }
 
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.spacing
+                        FieldLabel { text: "Límite de velocidad" }
+                        SpinBox {
+                            id: speedLimitSpin
+                            from: 0
+                            to: 1000000
+                            stepSize: 256
+                            editable: true
+                            value: bridge.speedLimitKbps
+                            onValueModified: bridge.speedLimitKbps = value
+                        }
+                        Text {
+                            text: "KiB/s por tarea · 0 = sin límite"
+                            color: Theme.subtleText
+                            font.pixelSize: Style.fontSizeSmall
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+
                     SdmCheck {
                         label: "Iniciar las tareas automáticamente"
                         checked: bridge.autoStart
@@ -282,6 +303,21 @@ Dialog {
                         label: "Reservar espacio en disco (preallocación)"
                         checked: bridge.preallocate
                         onToggled: bridge.preallocate = checked
+                    }
+                    SdmCheck {
+                        label: "Añadir enlaces copiados al portapapeles (estilo IDM)"
+                        checked: bridge.clipboardMonitor
+                        onToggled: bridge.clipboardMonitor = checked
+                    }
+                    SdmCheck {
+                        label: "Organizar por tipo en subcarpetas (Vídeos, Música, …)"
+                        checked: bridge.organizeByCategory
+                        onToggled: bridge.organizeByCategory = checked
+                    }
+                    SdmCheck {
+                        label: "Apagar el equipo cuando termine la cola"
+                        checked: bridge.shutdownWhenDone
+                        onToggled: bridge.shutdownWhenDone = checked
                     }
 
                     Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.border; Layout.topMargin: 10 }
@@ -425,7 +461,7 @@ Dialog {
 
                     Text {
                         Layout.leftMargin: 178
-                        text: "Pégala en el popup de la extensión (Ajustes de SDM) para vincular el navegador."
+                        text: "La conexión es automática: SDM registra el puente y aprende el ID de la extensión sola. Este campo es solo un rescate manual."
                         font.pixelSize: Style.fontSizeSmall
                         color: Theme.subtleText
                         wrapMode: Text.Wrap
@@ -439,12 +475,18 @@ Dialog {
                         LineEdit {
                             id: extensionField
                             text: bridge.extensionId
-                            placeholderText: "p. ej. abcdefghijklmnopqrstuvwxyzabcdef"
+                            placeholderText: "se detecta automáticamente al cargar la extensión"
                             onEditingFinished: bridge.extensionId = text
                         }
                         SdmToolButton {
                             label: "Aplicar"
                             onClicked: bridge.extensionId = extensionField.text
+                        }
+                        SdmToolButton {
+                            label: "Redetectar"
+                            // Vaciar el ID dispara un nuevo escaneo de perfiles
+                            // (setExtensionId -> writeNativeHostManifest).
+                            onClicked: bridge.extensionId = ""
                         }
                     }
 
@@ -523,6 +565,18 @@ Dialog {
                                 font.pixelSize: Style.fontSizeSmall
                                 font.family: Style.fontMono
                                 color: Theme.subtleText
+                            }
+                            Row {
+                                spacing: Style.spacing
+                                SdmToolButton {
+                                    label: "Buscar actualizaciones"
+                                    onClicked: bridge.checkForUpdates()
+                                }
+                                SdmToolButton {
+                                    visible: bridge.pendingUpdateUrl !== ""
+                                    label: "Descargar " + (bridge.pendingUpdateUrl !== "" ? "novedad" : "")
+                                    onClicked: bridge.openUpdatePage()
+                                }
                             }
                         }
                     }

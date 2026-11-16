@@ -28,6 +28,11 @@ Level level();
 /// Escribe una linea ya construida (thread-safe).
 void write(Level level, const QString& message);
 
+/// Enmascara credenciales antes de escribir en el log: parametros `token`,
+/// `password`, `cookies`, cabeceras `Authorization`/`Cookie`, credenciales
+/// embebidas en URLs y campos JSON equivalentes. Exportada para pruebas.
+QString redactSecrets(const QString& text);
+
 /// Escribe una linea formateada con fmt (thread-safe).
 template <typename... Args>
 inline void writef(Level level, fmt::format_string<Args...> fmtStr, Args&&... args) {

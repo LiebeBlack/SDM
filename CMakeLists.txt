@@ -142,6 +142,8 @@ set(SDM_CORE_SOURCES
     src/bridge/ProtocolHandler.cpp
     src/bridge/WebSocketServer.h
     src/bridge/WebSocketServer.cpp
+    src/bridge/NativeBridgeRegistrar.h
+    src/bridge/NativeBridgeRegistrar.cpp
 )
 
 set(SDM_UI_SOURCES
@@ -264,6 +266,28 @@ install(TARGETS SDM SDMNativeHost sdm_bridge
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     BUNDLE DESTINATION "."
 )
+
+if(WIN32)
+    # vcpkg compila libcurl / sqlite3 / fmt / z como DLLs dinamicas y solo las
+    # copia junto al .exe en el directorio de build (applocal.ps1). El install
+    # clasico (RUNTIME DESTINATION) instala solo los .exe, asi que sin este
+    # bloque dist\windows\bin quedaba sin esas DLLs y la aplicacion no arrancaba
+    # ("no se encuentra libcurl.dll / sqlite3.dll / fmt.dll").
+    # Se replica el conjunto que vcpkg dejo junto al ejecutable, lo que incluye
+    # dependencias transitivas como z.dll.
+    install(CODE [[
+        set(_sdm_bindir "$<TARGET_FILE_DIR:SDM>")
+        file(GLOB _sdm_runtime_dlls "${_sdm_bindir}/*.dll")
+        if(_sdm_runtime_dlls)
+            file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/bin"
+                 TYPE FILE FILES ${_sdm_runtime_dlls})
+            list(LENGTH _sdm_runtime_dlls _sdm_n)
+            message(STATUS "SDM: ${_sdm_n} DLLs de dependencias instaladas en bin")
+        else()
+            message(WARNING "SDM: no se encontraron DLLs de dependencias en ${_sdm_bindir}")
+        endif()
+    ]])
+endif()
 
 if(UNIX AND NOT APPLE)
     install(FILES packaging/linux/sdm.desktop

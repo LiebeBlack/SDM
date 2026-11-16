@@ -13,6 +13,7 @@
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QIcon>
+#include <QList>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QQmlApplicationEngine>
@@ -23,6 +24,7 @@
 #include <QSurfaceFormat>
 #include <QTimer>
 #include <QUrl>
+#include <QVariantMap>
 
 #include <curl/curl.h>
 
@@ -89,9 +91,15 @@ int main(int argc, char* argv[]) {
                                        QStringLiteral("dir"));
     const QCommandLineOption minimizedOption(QStringLiteral("minimized"),
                                              QStringLiteral("Arranca minimizado a la bandeja."));
+    // Integracion externa (estilo IDM): `SDM --url <enlace>` desde cualquier
+    // otro programa; si SDM ya esta abierto se le reenvia la descarga.
+    const QCommandLineOption urlOption({QStringLiteral("u"), QStringLiteral("url")},
+                                       QStringLiteral("Anade una descarga (admite lotes tipo [01-10])."),
+                                       QStringLiteral("url"));
     parser.addOption(portOption);
     parser.addOption(dirOption);
     parser.addOption(minimizedOption);
+    parser.addOption(urlOption);
     parser.process(app);
 
     // --- Instancia unica --------------------------------------------------
@@ -103,7 +111,11 @@ int main(int argc, char* argv[]) {
         QLocalSocket existing;
         existing.connectToServer(instanceName);
         if (existing.waitForConnected(400)) {
-            existing.write("raise\n");
+            QByteArray payload("raise\n");
+            if (parser.isSet(urlOption)) {
+                payload += "url " + parser.value(urlOption).toUtf8() + '\n';
+            }
+            existing.write(payload);
             existing.flush();
             existing.waitForBytesWritten(400);
         }
@@ -163,6 +175,7 @@ int main(int argc, char* argv[]) {
 
     ProtocolHandler protocol;
     protocol.setBridgeToken(bridgeInfo.token);
+    protocol.setBridgePort(bridgeInfo.port);
     QObject::connect(&webSocket, &WebSocketServer::messageReceived, &protocol,
                      [&webSocket, &protocol](const QByteArray& raw, QObject* sender) {
                          const QByteArray response = protocol.process(raw);
@@ -173,7 +186,16 @@ int main(int argc, char* argv[]) {
     QObject::connect(&protocol, &ProtocolHandler::push, &webSocket, &WebSocketServer::broadcast);
 
     gui.applyBridgeInfo(bridgeInfo.port, bridgeInfo.token, bridgeInfo.filePath, &webSocket);
-    gui.writeNativeHostManifest(); // manifiesto nativo siempre disponible
+    // applyBridgeInfo ya registra el puente nativo y arranca el reintento
+    // periodico hasta descubrir la extension del navegador.
+
+    // Descarga pedida por linea de comandos (primer arranque).
+    if (parser.isSet(urlOption)) {
+        QVariantMap cliTask;
+        cliTask.insert(QStringLiteral("url"), parser.value(urlOption));
+        cliTask.insert(QStringLiteral("source"), QStringLiteral("cli"));
+        gui.addTask(cliTask);
+    }
 
     // --- Carga del QML ------------------------------------------------------
     QObject::connect(&qmlEngine, &QQmlApplicationEngine::objectCreationFailed, &app,
@@ -195,18 +217,34 @@ int main(int argc, char* argv[]) {
     }
 
     // --- Elevacion desde otra instancia ------------------------------------
-    QObject::connect(&instanceServer, &QLocalServer::newConnection, &app, [&instanceServer, window]() {
+    QObject::connect(&instanceServer, &QLocalServer::newConnection, &app, [&instanceServer, window, &gui]() {
         while (instanceServer.hasPendingConnections()) {
             QLocalSocket* socket = instanceServer.nextPendingConnection();
             if (socket == nullptr) {
                 break;
             }
-            QObject::connect(socket, &QLocalSocket::readyRead, socket, [socket, window]() {
+            QObject::connect(socket, &QLocalSocket::readyRead, socket, [socket, window, &gui]() {
                 const QByteArray data = socket->readAll();
                 if (data.contains("raise") && window != nullptr) {
                     window->showNormal();
                     window->raise();
                     window->requestActivate();
+                }
+                // Enlaces reenviados por otra instancia o por un programa externo.
+                const QList<QByteArray> lines = data.split('\n');
+                for (const QByteArray& rawLine : lines) {
+                    const QByteArray line = rawLine.trimmed();
+                    if (!line.startsWith("url ")) {
+                        continue;
+                    }
+                    const QString url = QString::fromUtf8(line.mid(4)).trimmed();
+                    if (url.isEmpty()) {
+                        continue;
+                    }
+                    QVariantMap options;
+                    options.insert(QStringLiteral("url"), url);
+                    options.insert(QStringLiteral("source"), QStringLiteral("cli"));
+                    gui.addTask(options);
                 }
             });
         }

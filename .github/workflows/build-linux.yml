@@ -89,7 +89,7 @@ jobs:
             dist/sdm-linux-x86_64.tar.gz
             dist/SHA256SUMS-LINUX.txt
 
-      - name: Publicar en Releases
+      - name: Publicar en Releases (tag v*)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
@@ -98,3 +98,23 @@ jobs:
             dist/SHA256SUMS-LINUX.txt
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+          # Si falta cualquier artefacto, fallar en vez de publicar un release vacio
+          fail_on_unmatched_files: true
+
+      # Publicacion continua: cada push a main renueva el pre-release "continuous-linux".
+      # Tag propio por SO para que Linux y Windows no compitan por el mismo release.
+      - name: Publicar pre-release continua (main)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous-linux
+          name: SDM continuo · Linux (#${{ github.run_number }})
+          body: |
+            Compilacion automatica de `${{ github.ref_name }}` en `${{ github.sha }}`.
+
+            No es una version estable: para releases versionados hay que empujar un tag `v*`.
+          prerelease: true
+          files: |
+            dist/sdm-linux-x86_64.tar.gz
+            dist/SHA256SUMS-LINUX.txt
+          fail_on_unmatched_files: true

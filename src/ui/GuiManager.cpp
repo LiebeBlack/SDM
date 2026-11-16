@@ -5,6 +5,7 @@
 #include "ui/GuiManager.h"
 
 #include "bridge/WebSocketServer.h"
+#include "bridge/NativeBridgeRegistrar.h"
 #include "core/Log.h"
 
 #include <QClipboard>
@@ -15,16 +16,22 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QProcess>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocale>
-#include <QJsonArray>
 #include <QQmlContext>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QTimer>
 #include <QUrl>
+
+#include <algorithm>
 
 #ifdef Q_OS_WIN
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -544,6 +551,13 @@ GuiManager::GuiManager(QQmlApplicationEngine& engine, QObject* parent)
     connect(&downloadEngine, &DownloadEngine::toast, this, &GuiManager::toast);
     connect(&downloadEngine, &DownloadEngine::streamVariantsReady, this, &GuiManager::streamVariantsReady);
     connect(&downloadEngine, &DownloadEngine::statusChanged, this, &GuiManager::statsChanged);
+
+    // Accion de fin de cola (apagar el equipo) y comprobacion de actualizaciones.
+    m_finishedTimer = new QTimer(this);
+    m_finishedTimer->setInterval(5000);
+    connect(m_finishedTimer, &QTimer::timeout, this, &GuiManager::maybeRunFinishedAction);
+    m_finishedTimer->start();
+    QTimer::singleShot(20000, this, &GuiManager::checkForUpdates);
 }
 
 void GuiManager::registerContext() {
@@ -552,6 +566,14 @@ void GuiManager::registerContext() {
     context->setContextProperty(QStringLiteral("tasksModel"), m_tasksModel);
     context->setContextProperty(QStringLiteral("segmentsModel"), m_segmentsModel);
     context->setContextProperty(QStringLiteral("appVersion"), QStringLiteral("1.0.0"));
+
+    // Monitor de portapapeles (estilo IDM): al copiar un enlace se encola solo
+    // si el usuario ha activado la opcion en Ajustes.
+    if (QClipboard* clipboard = QGuiApplication::clipboard()) {
+        connect(clipboard, &QClipboard::dataChanged, this, [this]() {
+            handleClipboardText(QGuiApplication::clipboard()->text());
+        });
+    }
 }
 
 void GuiManager::initializeEngine(DatabaseManager* db) {
@@ -567,6 +589,18 @@ void GuiManager::applyBridgeInfo(quint16 port, const QString& token, const QStri
     if (server != nullptr) {
         connect(server, &WebSocketServer::clientConnected, this, &GuiManager::bridgeChanged);
         connect(server, &WebSocketServer::clientDisconnected, this, &GuiManager::bridgeChanged);
+    }
+    // Auto-configuracion: se registra el puente y, mientras no se haya
+    // detectado la extension, se reintenta cada minuto (el usuario puede
+    // cargarla en el navegador despues de arrancar SDM).
+    writeNativeHostManifest();
+    if (m_bridgeScanTimer == nullptr) {
+        m_bridgeScanTimer = new QTimer(this);
+        m_bridgeScanTimer->setInterval(60 * 1000);
+        connect(m_bridgeScanTimer, &QTimer::timeout, this, &GuiManager::writeNativeHostManifest);
+    }
+    if (!m_bridgeScanTimer->isActive()) {
+        m_bridgeScanTimer->start();
     }
     emit bridgeChanged();
 }
@@ -616,6 +650,11 @@ void GuiManager::loadSettings() {
     m_preallocate = settings.value(QStringLiteral("general/preallocate"), true).toBool();
     m_useYtDlp = settings.value(QStringLiteral("media/useYtDlp"), false).toBool();
     m_proxy = settings.value(QStringLiteral("network/proxy")).toString();
+    m_speedLimitKbps = settings.value(QStringLiteral("network/speedLimitKbps"), 0).toInt();
+    m_clipboardMonitor = settings.value(QStringLiteral("general/clipboardMonitor"), false).toBool();
+    m_organizeByCategory =
+        settings.value(QStringLiteral("general/organizeByCategory"), false).toBool();
+    m_shutdownWhenDone = settings.value(QStringLiteral("general/shutdownWhenDone"), false).toBool();
     m_ffmpegPath = settings.value(QStringLiteral("media/ffmpegPath"), QStringLiteral("ffmpeg")).toString();
     m_ytDlpPath = settings.value(QStringLiteral("media/ytDlpPath"), QStringLiteral("yt-dlp")).toString();
     m_darkMode = settings.value(QStringLiteral("ui/darkMode"), true).toBool();
@@ -623,7 +662,7 @@ void GuiManager::loadSettings() {
     m_nativeManifestPath =
         settings.value(QStringLiteral("bridge/nativeManifestPath"),
                        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
-                           QStringLiteral("/com.sdm.nativehost.json"))
+                           QStringLiteral("/native/com.sdm.bridge.json"))
             .toString();
     if (!QFileInfo::exists(m_downloadDir)) {
         QDir().mkpath(m_downloadDir);
@@ -640,6 +679,10 @@ void GuiManager::persistSettings() {
     settings.setValue(QStringLiteral("general/preallocate"), m_preallocate);
     settings.setValue(QStringLiteral("media/useYtDlp"), m_useYtDlp);
     settings.setValue(QStringLiteral("network/proxy"), m_proxy);
+    settings.setValue(QStringLiteral("network/speedLimitKbps"), m_speedLimitKbps);
+    settings.setValue(QStringLiteral("general/clipboardMonitor"), m_clipboardMonitor);
+    settings.setValue(QStringLiteral("general/organizeByCategory"), m_organizeByCategory);
+    settings.setValue(QStringLiteral("general/shutdownWhenDone"), m_shutdownWhenDone);
     settings.setValue(QStringLiteral("media/ffmpegPath"), m_ffmpegPath);
     settings.setValue(QStringLiteral("media/ytDlpPath"), m_ytDlpPath);
     settings.setValue(QStringLiteral("ui/darkMode"), m_darkMode);
@@ -657,6 +700,8 @@ EngineSettings GuiManager::buildEngineSettings() const {
     engineSettings.preallocateFiles = m_preallocate;
     engineSettings.useYtDlp = m_useYtDlp;
     engineSettings.proxy = m_proxy;
+    engineSettings.speedLimitKbps = std::max(0, m_speedLimitKbps);
+    engineSettings.organizeByCategory = m_organizeByCategory;
     engineSettings.ffmpegPath = m_ffmpegPath;
     engineSettings.ytDlpPath = m_ytDlpPath;
     return engineSettings;
@@ -727,6 +772,114 @@ void GuiManager::setUseYtDlp(bool value) {
 }
 
 QString GuiManager::proxy() const { return m_proxy; }
+int GuiManager::speedLimitKbps() const { return m_speedLimitKbps; }
+
+bool GuiManager::organizeByCategory() const { return m_organizeByCategory; }
+
+void GuiManager::setOrganizeByCategory(bool value) {
+    if (m_organizeByCategory == value) {
+        return;
+    }
+    m_organizeByCategory = value;
+    persistSettings();
+    pushEngineSettings();
+    emit settingsChanged();
+}
+
+bool GuiManager::shutdownWhenDone() const { return m_shutdownWhenDone; }
+
+void GuiManager::setShutdownWhenDone(bool value) {
+    if (m_shutdownWhenDone == value) {
+        return;
+    }
+    m_shutdownWhenDone = value;
+    m_finishedActionDone = false;
+    persistSettings();
+    emit settingsChanged();
+}
+
+QString GuiManager::pendingUpdateUrl() const { return m_pendingUpdateUrl; }
+
+void GuiManager::maybeRunFinishedAction() {
+    if (!m_shutdownWhenDone || m_finishedActionDone) {
+        return;
+    }
+    const DownloadEngine& engine = DownloadEngine::instance();
+    if (engine.taskCount() == 0 || engine.activeTaskCount() > 0 || engine.queuedTaskCount() > 0) {
+        return;
+    }
+    // Toda la cola ha terminado (completada o fallida).
+    m_finishedActionDone = true;
+#ifdef Q_OS_WIN
+    const bool started = QProcess::startDetached(
+        QStringLiteral("shutdown"),
+        {QStringLiteral("/s"), QStringLiteral("/t"), QStringLiteral("60")});
+    emit toast(started ? QStringLiteral("Cola terminada: el equipo se apagara en 60 s "
+                                       "(cancela con 'shutdown /a')")
+                       : QStringLiteral("Cola terminada, pero no se pudo programar el apagado"),
+               started ? 1 : 2);
+#else
+    emit toast(QStringLiteral("Cola terminada: apagando el equipo"), 1);
+    QProcess::startDetached(QStringLiteral("systemctl"), {QStringLiteral("poweroff")});
+#endif
+}
+
+bool GuiManager::clipboardMonitor() const { return m_clipboardMonitor; }
+
+void GuiManager::setClipboardMonitor(bool value) {
+    if (m_clipboardMonitor == value) {
+        return;
+    }
+    m_clipboardMonitor = value;
+    persistSettings();
+    emit settingsChanged();
+    if (value) {
+        // Escanea lo que ya esta copiado, como hace IDM al activar la opcion.
+        handleClipboardText(QGuiApplication::clipboard()->text());
+    }
+}
+
+void GuiManager::handleClipboardText(const QString& text) {
+    if (!m_clipboardMonitor) {
+        return;
+    }
+    const QString candidate = text.trimmed();
+    if (candidate.isEmpty() || candidate.size() > 8192 || candidate == m_lastClipboardUrl) {
+        return;
+    }
+    if (!candidate.contains(QLatin1String("://"))) {
+        return;
+    }
+    const QUrl url(candidate);
+    if (!url.isValid() || url.host().isEmpty()) {
+        return;
+    }
+    const QString scheme = url.scheme().toLower();
+    if (scheme != QLatin1String("http") && scheme != QLatin1String("https") &&
+        scheme != QLatin1String("ftp")) {
+        return;
+    }
+    m_lastClipboardUrl = candidate;
+
+    NewTaskRequest request;
+    request.url = candidate;
+    request.destDir = m_downloadDir;
+    request.threadCount = m_defaultThreads;
+    request.autoStart = m_autoStart;
+    request.source = QStringLiteral("clipboard");
+    const quint64 id = DownloadEngine::instance().addTask(request);
+    if (id != 0) {
+        emit toast(QStringLiteral("Añadido desde el portapapeles"), 1);
+    }
+}
+
+void GuiManager::setSpeedLimitKbps(int kbps) {
+    m_speedLimitKbps = std::max(0, kbps);
+    persistSettings();
+    pushEngineSettings();
+    emit settingsChanged();
+}
+
 void GuiManager::setProxy(const QString& value) {
     m_proxy = value.trimmed();
     persistSettings();
@@ -783,33 +936,49 @@ QString GuiManager::nativeManifestPath() const { return m_nativeManifestPath; }
 
 void GuiManager::writeNativeHostManifest() {
 #ifdef Q_OS_WIN
-    const QString hostPath = QCoreApplication::applicationDirPath() + QStringLiteral("/SDMNativeHost.exe");
+    const QString hostPath =
+        QCoreApplication::applicationDirPath() + QStringLiteral("/SDMNativeHost.exe");
 #else
-    const QString hostPath = QCoreApplication::applicationDirPath() + QStringLiteral("/SDMNativeHost");
+    const QString hostPath =
+        QCoreApplication::applicationDirPath() + QStringLiteral("/SDMNativeHost");
 #endif
+    const QString manifestDir =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+        + QStringLiteral("/native");
 
-    QJsonObject root;
-    root.insert(QStringLiteral("name"), QStringLiteral("com.sdm.nativehost"));
-    root.insert(QStringLiteral("description"), QStringLiteral("S-Download Manager native bridge"));
-    root.insert(QStringLiteral("path"), hostPath);
-    root.insert(QStringLiteral("type"), QStringLiteral("stdio"));
-
-    QJsonArray origins;
-    const QString originId = m_extensionId.isEmpty() ? QStringLiteral("PEGA_EL_ID_DE_LA_EXTENSION")
-                                                     : m_extensionId;
-    origins.append(QStringLiteral("chrome-extension://%1/").arg(originId));
-    root.insert(QStringLiteral("allowed_origins"), origins);
-
-    QDir().mkpath(QFileInfo(m_nativeManifestPath).absolutePath());
-    QFile file(m_nativeManifestPath);
-    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
-        file.close();
-        log::info("Manifiesto nativo escrito en {}", log::utf8(m_nativeManifestPath));
-    } else {
-        log::error("No se pudo escribir {}", log::utf8(m_nativeManifestPath));
-        emit toast(QStringLiteral("No se pudo escribir el manifiesto nativo"), 2);
+    QStringList extraIds;
+    if (!m_extensionId.isEmpty()) {
+        extraIds.append(m_extensionId);
     }
+
+    const bridge::NativeBridgeRegistration result =
+        bridge::registerNativeBridge(hostPath, manifestDir, extraIds);
+
+    if (!result.manifestPath.isEmpty() && result.manifestPath != m_nativeManifestPath) {
+        m_nativeManifestPath = result.manifestPath;
+        persistSettings();
+    }
+    if (!result.extensionIds.isEmpty()) {
+        // El ID descubierto manda sobre el manual (el manual solo se usa si
+        // el descubrimiento no encuentra nada).
+        const QString origin = result.extensionIds.first();
+        const QString detected = origin.mid(QStringLiteral("chrome-extension://").size())
+                                     .remove(QLatin1Char('/'));
+        if (!detected.isEmpty() && detected != m_extensionId) {
+            m_extensionId = detected;
+            persistSettings();
+            log::info("Extension detectada automaticamente: {}", log::utf8(detected));
+            emit toast(QStringLiteral("Extension de navegador conectada automaticamente"), 1);
+        }
+        // Ya hay extension: no hace falta seguir escaneando perfiles.
+        if (m_bridgeScanTimer != nullptr) {
+            m_bridgeScanTimer->stop();
+        }
+    }
+    for (const QString& warning : result.warnings) {
+        log::info("Puente nativo: {}", log::utf8(warning));
+    }
+    emit bridgeChanged();
 }
 
 // ---------------------------------------------------------------------------
@@ -879,6 +1048,45 @@ double GuiManager::memoryMb() const {
 #endif
 }
 
+void GuiManager::checkForUpdates() {
+    if (m_updateCheck == nullptr) {
+        m_updateCheck = new QNetworkAccessManager(this);
+    }
+    QNetworkRequest request(
+        QUrl(QStringLiteral("https://api.github.com/repos/LiebeBlack/SDM/releases/latest")));
+    request.setRawHeader("Accept", "application/vnd.github+json");
+    request.setHeader(QNetworkRequest::UserAgentHeader,
+                      QStringLiteral("SDM/%1").arg(QCoreApplication::applicationVersion()));
+    QNetworkReply* reply = m_updateCheck->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            log::info("Comprobacion de actualizaciones fallida: {}", log::utf8(reply->errorString()));
+            return;
+        }
+        const QJsonObject release = QJsonDocument::fromJson(reply->readAll()).object();
+        QString tag = release.value(QStringLiteral("tag_name")).toString();
+        tag.remove(QLatin1Char('v'));
+        const QString current = QCoreApplication::applicationVersion();
+        if (tag.isEmpty()) {
+            return;
+        }
+        if (compareVersions(tag, current) > 0) {
+            m_pendingUpdateUrl = release.value(QStringLiteral("html_url")).toString();
+            emit toast(QStringLiteral("Nueva version disponible: %1 (tienes %2)").arg(tag, current),
+                       1);
+        } else {
+            log::info("SDM actualizado ({} >= {})", log::utf8(current), log::utf8(tag));
+        }
+    });
+}
+
+void GuiManager::openUpdatePage() {
+    if (!m_pendingUpdateUrl.isEmpty()) {
+        QDesktopServices::openUrl(QUrl(m_pendingUpdateUrl));
+    }
+}
+
 void GuiManager::refreshStats() {
     emit statsChanged();
 }
@@ -907,9 +1115,42 @@ quint64 GuiManager::addTask(const QVariantMap& options) {
     request.source = options.value(QStringLiteral("source"), QStringLiteral("manual")).toString();
 
     // Deteccion automatica de manifiestos multimedia (spec cap. 9).
-    const QString lower = url.toLower();
-    if (lower.contains(QLatin1String(".m3u8")) || lower.contains(QLatin1String(".mpd")) ||
-        lower.contains(QLatin1String("format=m3u8"))) {
+    const auto isStreamUrl = [](const QString& candidate) {
+        const QString lower = candidate.toLower();
+        return lower.contains(QLatin1String(".m3u8")) || lower.contains(QLatin1String(".mpd")) ||
+               lower.contains(QLatin1String("format=m3u8"));
+    };
+
+    // Lote estilo IDM: "archivo[01-10].zip" genera una tarea por URL.
+    if (containsBatchPattern(url)) {
+        const QStringList expandedUrls = expandBatchPattern(url);
+        if (expandedUrls.size() > 1) {
+            quint64 firstId = 0;
+            int added = 0;
+            for (const QString& expandedUrl : expandedUrls) {
+                NewTaskRequest item = request;
+                item.url = expandedUrl;
+                const quint64 id = isStreamUrl(expandedUrl)
+                                       ? engine.addStreamTask(expandedUrl, item.destDir, item.referer,
+                                                              item.cookies, item.fileName)
+                                       : engine.addTask(item);
+                if (id != 0) {
+                    ++added;
+                    if (firstId == 0) {
+                        firstId = id;
+                    }
+                }
+            }
+            if (added > 0) {
+                emit toast(QStringLiteral("Lote añadido: %1 descargas").arg(added), 1);
+            } else {
+                emit toast(QStringLiteral("El lote no genero ninguna descarga valida"), 2);
+            }
+            return firstId;
+        }
+    }
+
+    if (isStreamUrl(url)) {
         return engine.addStreamTask(url, request.destDir, request.referer, request.cookies, request.fileName);
     }
     return engine.addTask(request);

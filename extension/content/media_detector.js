@@ -2,9 +2,12 @@
 //  S-DOWNLOAD MANAGER (SDM)
 //  extension/content/media_detector.js
 //
-//  Deteccion de transmisiones (HLS/DASH) y vídeos <video> en la pagina
+//  Deteccion de transmisiones (HLS/DASH) y videos <video> en la pagina
 //  (spec cap. 9).  Emite CustomEvent("sdm-media-detected") que consume
-//  content_script.js para mostrar el boton flotante de captura.
+//  content_script.js para mostrar el boton flotante junto al video.
+//
+//  El evento lleva `el`: el elemento <video> al que anclar el boton (o null si
+//  la deteccion vino de la red y no hay reproductor visible).
 // ============================================================================
 
 "use strict";
@@ -14,7 +17,8 @@
   window.__sdmDetectorLoaded = true;
 
   const seen = new Set();
-  let current = null; // { url, kind, title, pageUrl }
+  const kinds = new Map(); // url -> kind (para el panel del popup)
+  let current = null; // { url, kind, title, pageUrl, el }
 
   function emit(detail) {
     current = detail;
@@ -33,19 +37,41 @@
     return null;
   }
 
-  function consider(url, kindHint) {
+  // -------------------------------------------------------------------------
+  // Reproductor visible al que anclar el boton flotante (el mas grande y, si
+  // hay varios, el que esta reproduciendo).
+  // -------------------------------------------------------------------------
+  function bestVideoElement() {
+    let best = null;
+    let bestScore = -1;
+    document.querySelectorAll("video").forEach((video) => {
+      const rect = video.getBoundingClientRect();
+      if (rect.width < 120 || rect.height < 80) return;
+      const playing = !video.paused && !video.ended && video.readyState > 2;
+      const score = rect.width * rect.height * (playing ? 4 : 1);
+      if (score > bestScore) {
+        bestScore = score;
+        best = video;
+      }
+    });
+    return best;
+  }
+
+  function consider(url, kindHint, element) {
     if (!url || url.startsWith("blob:") || url.startsWith("data:")) return;
     const kind = kindHint || classify(url);
     if (!kind || kind === "segment") return;
     if (seen.has(url)) return;
     seen.add(url);
+    kinds.set(url, kind);
     // Prioridad: manifiestos HLS/DASH por encima de ficheros sueltos.
     if (current && current.kind !== "file" && kind === "file") return;
     emit({
       url,
       kind,
       title: document.title || "",
-      pageUrl: location.href
+      pageUrl: location.href,
+      el: element || bestVideoElement()
     });
   }
 
@@ -53,7 +79,7 @@
   try {
     const observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
-        consider(entry.name);
+        consider(entry.name, null, null);
       }
     });
     observer.observe({ type: "resource", buffered: true });
@@ -64,23 +90,23 @@
   // 2) Elementos <video>/<source> y atributos data-src de reproductores comunes.
   function scanDom() {
     document.querySelectorAll("video, audio").forEach((el) => {
-      if (el.src) consider(el.src);
+      if (el.src) consider(el.src, null, el);
       el.querySelectorAll("source").forEach((src) => {
-        if (src.src) consider(src.src);
+        if (src.src) consider(src.src, null, el);
       });
       // Reproductores que cargan el manifiesto en data-* attributes.
       const attrs = el.attributes;
       for (let i = 0; i < attrs.length; i++) {
         const a = attrs[i];
         if (a.name.startsWith("data-") && /https?:\/\//.test(a.value) && classify(a.value)) {
-          consider(a.value);
+          consider(a.value, null, el);
         }
       }
     });
     // Iframes embebidos: no podemos inspeccionarlos cross-origin, pero los
     // <source> del mismo origen si.
     document.querySelectorAll("source").forEach((src) => {
-      if (src.src) consider(src.src);
+      if (src.src) consider(src.src, null, src.closest("video, audio"));
     });
   }
 
@@ -103,6 +129,9 @@
   // API interna para content_script.js / depuracion.
   window.__sdmMedia = {
     current: () => current,
-    list: () => Array.from(seen)
+    element: () => (current && current.el && current.el.isConnected ? current.el : bestVideoElement()),
+    list: () => Array.from(seen),
+    // Lista {url, kind} para el panel "Medios detectados" del popup.
+    items: () => Array.from(seen).map((url) => ({ url, kind: kinds.get(url) || "file" }))
   };
 })();

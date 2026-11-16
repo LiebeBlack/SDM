@@ -19,6 +19,8 @@
 
 class QQmlApplicationEngine;
 class QQuickWindow;
+class QTimer;
+class QNetworkAccessManager;
 
 namespace sdm {
 
@@ -160,6 +162,16 @@ class GuiManager : public QObject {
     Q_PROPERTY(bool preallocate READ preallocate WRITE setPreallocate NOTIFY settingsChanged)
     Q_PROPERTY(bool useYtDlp READ useYtDlp WRITE setUseYtDlp NOTIFY settingsChanged)
     Q_PROPERTY(QString proxy READ proxy WRITE setProxy NOTIFY settingsChanged)
+    /// Limite de velocidad por tarea en KiB/s (0 = sin limite), estilo IDM.
+    Q_PROPERTY(int speedLimitKbps READ speedLimitKbps WRITE setSpeedLimitKbps NOTIFY settingsChanged)
+    /// Anade automaticamente los enlaces copiados al portapapeles (estilo IDM).
+    Q_PROPERTY(bool clipboardMonitor READ clipboardMonitor WRITE setClipboardMonitor NOTIFY settingsChanged)
+    /// Guarda cada descarga en una subcarpeta por tipo (Videos, Musica, ...).
+    Q_PROPERTY(bool organizeByCategory READ organizeByCategory WRITE setOrganizeByCategory NOTIFY settingsChanged)
+    /// Apaga el equipo cuando la cola termina (estilo IDM "shutdown when done").
+    Q_PROPERTY(bool shutdownWhenDone READ shutdownWhenDone WRITE setShutdownWhenDone NOTIFY settingsChanged)
+    /// URL del release mas reciente detectado (vacia si no hay novedad).
+    Q_PROPERTY(QString pendingUpdateUrl READ pendingUpdateUrl NOTIFY settingsChanged)
     Q_PROPERTY(QString ffmpegPath READ ffmpegPath WRITE setFfmpegPath NOTIFY settingsChanged)
     Q_PROPERTY(QString ytDlpPath READ ytDlpPath WRITE setYtDlpPath NOTIFY settingsChanged)
 
@@ -215,6 +227,15 @@ public:
     void setUseYtDlp(bool value);
     QString proxy() const;
     void setProxy(const QString& value);
+    int speedLimitKbps() const;
+    void setSpeedLimitKbps(int kbps);
+    bool clipboardMonitor() const;
+    void setClipboardMonitor(bool value);
+    bool organizeByCategory() const;
+    void setOrganizeByCategory(bool value);
+    bool shutdownWhenDone() const;
+    void setShutdownWhenDone(bool value);
+    QString pendingUpdateUrl() const;
     QString ffmpegPath() const;
     void setFfmpegPath(const QString& value);
     QString ytDlpPath() const;
@@ -267,6 +288,10 @@ public:
     /// Instantanea de una tarea para paneles de detalle (SegmentBar, etc.).
     Q_INVOKABLE QVariantMap taskInfo(quint64 id) const;
     Q_INVOKABLE void refreshStats();
+    /// Comprueba si hay una version nueva en GitHub Releases (toast con resultado).
+    Q_INVOKABLE void checkForUpdates();
+    /// Abre en el navegador la pagina del release detectado.
+    Q_INVOKABLE void openUpdatePage();
 
 signals:
     void settingsChanged();
@@ -297,6 +322,13 @@ private:
     bool m_preallocate = true;
     bool m_useYtDlp = false;
     QString m_proxy;
+    int m_speedLimitKbps = 0;
+    bool m_clipboardMonitor = false;
+    bool m_organizeByCategory = false;
+    bool m_shutdownWhenDone = false;
+    bool m_finishedActionDone = false;
+    QString m_lastClipboardUrl;
+    QString m_pendingUpdateUrl;
     QString m_ffmpegPath = QStringLiteral("ffmpeg");
     QString m_ytDlpPath = QStringLiteral("yt-dlp");
     bool m_darkMode = true;
@@ -305,8 +337,18 @@ private:
     quint16 m_bridgePort = 0;
     QString m_bridgeToken;
     QString m_bridgeFilePath;
+    /// Detecta un enlace nuevo en el portapapeles y lo encola.
+    void handleClipboardText(const QString& text);
+    /// Ejecuta la accion de fin de cola (apagar el equipo) si esta activada.
+    void maybeRunFinishedAction();
+
     QString m_extensionId;
     QString m_nativeManifestPath;
+    /// Reintenta el descubrimiento de la extension hasta encontrarla.
+    QTimer* m_bridgeScanTimer = nullptr;
+    /// Vigila el fin de la cola para la accion de apagado.
+    QTimer* m_finishedTimer = nullptr;
+    QNetworkAccessManager* m_updateCheck = nullptr;
     bool m_micaEnabled = false;
     QQuickWindow* m_window = nullptr;
 };

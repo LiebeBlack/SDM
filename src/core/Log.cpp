@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTextStream>
 
@@ -52,6 +53,32 @@ void rotateIfNeededLocked() {
 }
 
 } // namespace
+
+QString redactSecrets(const QString& text) {
+    if (text.isEmpty()) {
+        return text;
+    }
+    // Parametros de consulta (token=..., cookies=...): son los que llevan mas
+    // riesgo porque el protocolo y los logs de curl los incluyen tal cual.
+    static const QRegularExpression kParams(
+        QStringLiteral("(?i)\b(token|access_token|api_key|password|cookies|httpPass)"
+                       "=([^&\s\"']+)"));
+    // Campos JSON del protocolo: {"token":"...", "cookies":"..."}
+    static const QRegularExpression kJsonFields(QStringLiteral(
+        "(?i)\"(token|cookies|httpPass|password|access_token)\"\s*:\s*\"[^\"]*\""));
+    // Cabeceras HTTP sensibles.
+    static const QRegularExpression kHeaders(QStringLiteral(
+        "(?i)\b(authorization|proxy-authorization|cookie|set-cookie)\s*:\s*[^\r\n]+"));
+    // Credenciales embebidas: http://usuario:clave@host/...
+    static const QRegularExpression kUrlCredentials(QStringLiteral("(://[^/:@\s]+):([^@\s]+)@"));
+
+    QString safe = text;
+    safe.replace(kParams, QStringLiteral("\1=***"));
+    safe.replace(kJsonFields, QStringLiteral("\"\1\":\"***\""));
+    safe.replace(kHeaders, QStringLiteral("\1: ***"));
+    safe.replace(kUrlCredentials, QStringLiteral("\1:***@"));
+    return safe;
+}
 
 bool init(const QString& dir) {
     QMutexLocker lock(&g_mutex);
@@ -98,7 +125,9 @@ void write(Level level, const QString& message) {
         return;
     }
     const QString stamp = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
-    const QString line = QStringLiteral("%1 [%2] %3").arg(stamp, levelTag(level), message);
+    // Nunca se escriben credenciales en claro (tokens, cookies, Authorization).
+    const QString line =
+        QStringLiteral("%1 [%2] %3").arg(stamp, levelTag(level), redactSecrets(message));
 
     if (g_file != nullptr && g_file->isOpen()) {
         rotateIfNeededLocked();

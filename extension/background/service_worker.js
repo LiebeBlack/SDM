@@ -89,6 +89,17 @@ function parseConnectionKey(key) {
   return { port, token };
 }
 
+// Guarda el par puerto:token que entrega SDM (por el host nativo) para que el
+// canal WebSocket de respaldo quede configurado solo, sin intervencion humana.
+async function adoptConnectionKey(port, token) {
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) return;
+  if (typeof token !== "string" || token.length < 16) return;
+  const key = `${port}:${token}`;
+  if (key === config.connectionKey) return;
+  await saveConfig({ connectionKey: key });
+  log(`Clave del puente aprendida automaticamente (ws://127.0.0.1:${port})`);
+}
+
 function isBlockedUrl(url) {
   try {
     const host = new URL(url).hostname.toLowerCase();
@@ -146,6 +157,17 @@ function currentTabInfo() {
 // Canal con SDM: Native Messaging (primario)
 // ---------------------------------------------------------------------------
 
+function sendHello() {
+  // El host nativo ya es un canal de confianza (lo lanzo el navegador para
+  // esta extension), asi que el saludo solo aporta el token si lo conocemos.
+  const parsed = parseConnectionKey(config.connectionKey);
+  if (parsed) {
+    postRaw({ type: "hello", ref: newRef("h"), payload: { token: parsed.token } });
+  }
+  // Pide a SDM puerto + token para dejar listo el respaldo WebSocket.
+  postRaw({ type: "getBridgeInfo", ref: newRef("g") });
+}
+
 function connectNative() {
   if (nativePort || nativeFailed) return;
   try {
@@ -155,12 +177,17 @@ function connectNative() {
       const err = chrome.runtime.lastError;
       if (err) log("Native host desconectado:", err.message);
       nativePort = null;
-      // No castigar con reintentos infinitos si el host no esta instalado:
-      // solo reintentamos suavemente y dejamos el WS como fallback.
+      // Se marca el canal nativo como no disponible para que ensureChannel()
+      // abra YA el WebSocket (que SDM autoconfigura) en vez de quedarse en
+      // bucle reintentando un host que no responde.
+      nativeFailed = true;
+      if (connectionState === "native") connectionState = "disconnected";
+      updateBadge();
+      ensureChannel();
       setTimeout(() => {
-        nativeFailed = false;
+        nativeFailed = false; // reintento suave del canal nativo
         ensureChannel();
-      }, 5000);
+      }, 30000);
     });
     connectionState = "native";
     updateBadge();
@@ -344,6 +371,14 @@ function onSdmMessage(msg) {
       log("SDM version", msg.payload && msg.payload.version);
       connectionState = nativePort ? "native" : "ws";
       updateBadge();
+      break;
+
+    case "bridgeInfo":
+      // SDM publica aqui el puerto y el token del WebSocket local: asi el
+      // canal de respaldo queda configurado sin que el usuario pegue nada.
+      if (msg.payload) {
+        adoptConnectionKey(Number(msg.payload.port), msg.payload.token);
+      }
       break;
 
     case "pong":

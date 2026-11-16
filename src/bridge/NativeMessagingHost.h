@@ -88,6 +88,10 @@ private:
     /// Entrega al WebSocket los mensajes del navegador retenidos.
     void flushPendingToSdm();
 
+    /// Arranca SDM (minimizado) si aun no esta en ejecucion. Solo se intenta
+    /// una vez por proceso: evita bucles de lanzamiento si falta el binario.
+    bool launchSdm(const char* reason);
+
     QWebSocket* m_socket = nullptr;
     QTimer* m_reconnectTimer = nullptr;
     quint16 m_port = 0;

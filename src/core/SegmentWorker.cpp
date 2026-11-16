@@ -239,6 +239,11 @@ bool SegmentWorker::performOnce(int* httpStatus, bool* rangeIgnored, QString* er
     curl_slist* slist = BrowserEmulator::buildSlist(headers);
 
     BrowserEmulator::applyCommonOptions(easy, m_request.task, BrowserEmulator::currentProfile(), m_request.proxy);
+    if (m_request.maxBytesPerSec > 0) {
+        // Limite de velocidad (estilo IDM): libcurl promedia y frena el socket.
+        curl_easy_setopt(easy, CURLOPT_MAX_RECV_SPEED_LARGE,
+                         static_cast<curl_off_t>(m_request.maxBytesPerSec));
+    }
     curl_easy_setopt(easy, CURLOPT_URL, urlBytes.constData());
     curl_easy_setopt(easy, CURLOPT_HTTPHEADER, slist);
     curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, &SegmentWorker::writeThunk);

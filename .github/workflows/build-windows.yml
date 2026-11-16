@@ -57,11 +57,71 @@ jobs:
         shell: pwsh
         run: cmake --install build/release --prefix dist/windows
 
-      - name: Runtime de Qt (windeployqt)
+      # Red de seguridad: CMake ya instala las DLLs de vcpkg (ver CMakeLists.txt).
+      # Si por lo que sea faltan en dist/windows/bin, se copian desde el arbol de
+      # build, donde vcpkg las dejo (applocal). Sin esto el instalador arranca
+      # pero la app muere con "no se encuentra libcurl.dll / sqlite3.dll / fmt.dll".
+      - name: Asegurar DLLs de dependencias (libcurl, sqlite3, fmt, z)
         shell: pwsh
         run: |
-          windeployqt --qmldir src/ui/qml dist/windows/bin/SDM.exe
-          windeployqt dist/windows/bin/SDMNativeHost.exe
+          $bin = 'dist\windows\bin'
+          $deps = Get-ChildItem 'build\release' -Filter *.dll -ErrorAction SilentlyContinue
+          if (-not $deps) { throw 'No hay DLLs en build\release: el deploy applocal de vcpkg no se ejecuto' }
+          $copied = @()
+          foreach ($d in $deps) {
+            $dest = Join-Path $bin $d.Name
+            if (-not (Test-Path $dest)) { Copy-Item $d.FullName $dest; $copied += $d.Name }
+          }
+          if ($copied) { Write-Warning "Copiadas desde build: $($copied -join ', ')" }
+          else { Write-Host 'El install de CMake ya incluyo las DLLs de dependencias' }
+
+      - name: Runtime de Qt y CRT de MSVC (windeployqt)
+        shell: pwsh
+        run: |
+          windeployqt --qmldir src/ui/qml --compiler-runtime dist/windows/bin/SDM.exe
+          windeployqt --compiler-runtime dist/windows/bin/SDMNativeHost.exe
+          # --compiler-runtime deja el CRT app-local (msvcp140 / vcruntime140 / vcruntime140_1),
+          # que es lo que permite prescindir del vc_redist y de la elevacion de UAC.
+          # Red de seguridad: copiarlo del redistribuible del toolset si no lo hizo.
+          $crt = Get-ChildItem (Join-Path $env:VCToolsRedistDir 'x64') -Directory -Filter 'Microsoft.VC*.CRT' |
+            Select-Object -First 1
+          if ($crt) {
+            Copy-Item (Join-Path $crt.FullName '*.dll') dist\windows\bin -Force
+            Write-Host "CRT copiado desde $($crt.FullName)"
+          } else {
+            Write-Warning 'No se encontro la carpeta Microsoft.VC*.CRT en VCToolsRedistDir'
+          }
+
+      # Falla el build aqui (y no en la maquina del usuario) si el arbol instalado
+      # no es autosuficiente: recorre las dependencias reales de cada .exe y .dll.
+      - name: Verificar dependencias de dist/windows/bin
+        shell: pwsh
+        run: |
+          $bin = Join-Path $PWD 'dist\windows\bin'
+          if (-not (Test-Path $bin)) { throw "No existe $bin" }
+          $targets = @(
+            (Join-Path $bin 'SDM.exe'),
+            (Join-Path $bin 'SDMNativeHost.exe')
+          ) + @(Get-ChildItem $bin -Filter *.dll | ForEach-Object FullName)
+          $missing = @()
+          foreach ($t in $targets) {
+            if (-not (Test-Path $t)) { $missing += [System.IO.Path]::GetFileName($t); continue }
+            $deps = & dumpbin /nologo /dependents $t | ForEach-Object {
+              if ($_ -match '^\s+([\w\.\-]+\.dll)\s*$') { $Matches[1] }
+            }
+            foreach ($d in $deps) {
+              if (Test-Path (Join-Path $bin $d)) { continue }
+              if (Test-Path (Join-Path $env:SystemRoot "System32\$d")) { continue }
+              $missing += "$([System.IO.Path]::GetFileName($t)) -> $d"
+            }
+          }
+          if ($missing) {
+            Write-Host 'Dependencias ausentes en dist/windows/bin:' -ForegroundColor Red
+            $missing | Sort-Object -Unique | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }
+          Write-Host 'Arbol instalado autosuficiente. DLLs incluidas:'
+          Get-ChildItem $bin -Filter *.dll | Select-Object -ExpandProperty Name | Sort-Object
 
       - name: Empaquetar extension MV3
         shell: pwsh
@@ -101,7 +161,7 @@ jobs:
             dist/sdm-extension-*.zip
             dist/SHA256SUMS-WIN.txt
 
-      - name: Publicar en Releases
+      - name: Publicar en Releases (tag v*)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
@@ -112,3 +172,25 @@ jobs:
             dist/SHA256SUMS-WIN.txt
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+          # Si falta cualquier artefacto, fallar en vez de publicar un release vacio
+          fail_on_unmatched_files: true
+
+      # Publicacion continua: cada push a main renueva el pre-release "continuous-windows".
+      # Tag propio por SO para que Linux y Windows no compitan por el mismo release.
+      - name: Publicar pre-release continua (main)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous-windows
+          name: SDM continuo · Windows (#${{ github.run_number }})
+          body: |
+            Compilacion automatica de `${{ github.ref_name }}` en `${{ github.sha }}`.
+
+            No es una version estable: para releases versionados hay que empujar un tag `v*`.
+          prerelease: true
+          files: |
+            dist/SDM-Setup-*.exe
+            dist/sdm-portable-win64.zip
+            dist/sdm-extension-*.zip
+            dist/SHA256SUMS-WIN.txt
+          fail_on_unmatched_files: true

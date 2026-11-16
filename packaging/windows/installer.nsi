@@ -46,54 +46,16 @@ SetCompressor /SOLID lzma
 ShowInstDetails show
 ShowUnInstDetails show
 
-Var ExtID
-Var Dialog
-Var ExtIDBox
-Var WarnLabel
-
 ; ---------------------------------------------------------------------------
-; Página personalizada: ID de la extensión (para allowed_origins de Chrome).
-; La declaración `Page custom` va más abajo, justo después de MUI_PAGE_DIRECTORY.
+; Puente nativo: SIN configuracion manual.
+;  - Firefox usa un id de extension fijo (sdm@sdm.local) y se registra aqui.
+;  - Chrome/Chromium/Edge/Brave/Vivaldi/Opera se registran aqui y el propio SDM
+;    rellena `allowed_origins` al arrancar: detecta el ID de la extension en los
+;    perfiles del navegador (src/bridge/NativeBridgeRegistrar.cpp) y, si aun no
+;    esta cargada, reintenta cada minuto hasta encontrarla.
 ; ---------------------------------------------------------------------------
-
-Function fncExtIdPageCreate
-    !insertmacro MUI_HEADER_TEXT "Puente nativo" "Identificador de la extensión del navegador"
-    nsDialogs::Create 1018
-    Pop $Dialog
-    ${If} $Dialog == error
-        Abort
-    ${EndIf}
-
-    ${NSD_CreateLabel} 0 0 100% 48u "Copie el ID de la extensión desde chrome://extensions (o edge://extensions) con el 'Modo de desarrollador' activado. Si aún no la ha cargado, deje el valor por defecto y regístrelo más tarde desde SDM (Ajustes → Puente)."
-    Pop $0
-
-    ${If} $ExtID == ""
-        StrCpy $ExtID "EXTENSION_ID_REPLACE_ME"
-    ${EndIf}
-
-    ${NSD_CreateLabel} 0 52u 100% 10u "ID de la extensión:"
-    Pop $0
-    ${NSD_CreateText} 0 63u 100% 12u $ExtID
-    Pop $ExtIDBox
-
-    ${NSD_CreateLabel} 0 78u 100% 34u "Firefox: use un ID fijo (browser_specific_settings → gecko → id = sdm@sdm.local); el instalador lo registra por defecto."
-    Pop $WarnLabel
-
-    nsDialogs::Show
-FunctionEnd
-
-Function fncExtIdPageLeave
-    Pop $0 ; HWND del diálogo
-    ${NSD_GetText} $ExtIDBox $ExtID
-    ${If} $ExtID == ""
-        StrCpy $ExtID "EXTENSION_ID_REPLACE_ME"
-    ${EndIf}
-FunctionEnd
 
 !insertmacro MUI_PAGE_DIRECTORY
-; Página personalizada "Puente nativo": el orden de declaración define el orden
-; de las páginas, así que se inserta aquí para que aparezca tras el directorio.
-Page custom fncExtIdPageCreate fncExtIdPageLeave
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 
@@ -129,6 +91,23 @@ Section "Programa (obligatorio)" SecMain
 
     SetOutPath "$INSTDIR"
     File /r "..\..\dist\windows\*.*"
+
+    ; --- Comprobacion de dependencias dinamicas ---------------------------
+    ; Si el paquete se genero sin las DLLs de vcpkg (libcurl/sqlite3/fmt), la
+    ; app moriria al arrancar con un error opaco de Windows. Mejor avisar aqui.
+    StrCpy $R1 0
+    ${IfNot} ${FileExists} "$INSTDIR\bin\libcurl.dll"
+        StrCpy $R1 1
+    ${EndIf}
+    ${IfNot} ${FileExists} "$INSTDIR\bin\sqlite3.dll"
+        StrCpy $R1 1
+    ${EndIf}
+    ${IfNot} ${FileExists} "$INSTDIR\bin\fmt.dll"
+        StrCpy $R1 1
+    ${EndIf}
+    ${If} $R1 == 1
+        MessageBox MB_ICONEXCLAMATION|MB_OK "El instalador no encontro las librerias de dependencias (libcurl, sqlite3, fmt) en $INSTDIR\bin.$\r$\n$\r$\nSDM no arrancara. Descargue de nuevo el instalador desde la pagina de releases: el paquete esta incompleto (el runtime de MSVC ya va incluido en $INSTDIR\bin, no necesita el redistribuible de Visual C++)."
+    ${EndIf}
 
     ; --- Menú Inicio -------------------------------------------------------
     CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
@@ -169,11 +148,13 @@ Section "Programa (obligatorio)" SecMain
 SectionEnd
 
 Section "Puente nativo (Native Messaging)" SecNativeHost
-    ; --- JSON para Chrome / Edge / Brave ----------------------------------
+    ; --- JSON para Chrome / Edge / Brave / Vivaldi / Opera --------------
     StrCpy $R9 "$INSTDIR\bin\SDMNativeHost.exe"
     Call EscapeJsonPath
     ; $R8 = ruta escapada para JSON
 
+    ; `allowed_origins` se deja vacio a proposito: SDM lo rellena al arrancar con
+    ; el ID real que detecta en el perfil del navegador (auto-configuracion).
     SetOutPath "$INSTDIR"
     FileOpen $0 "$INSTDIR\com.sdm.bridge.chrome.json" w
     FileWrite $0 '{$\n'
@@ -182,7 +163,6 @@ Section "Puente nativo (Native Messaging)" SecNativeHost
     FileWrite $0 '  "path": "$R8",$\n'
     FileWrite $0 '  "type": "stdio",$\n'
     FileWrite $0 '  "allowed_origins": [$\n'
-    FileWrite $0 '    "chrome-extension://$ExtID/"$\n'
     FileWrite $0 '  ]$\n'
     FileWrite $0 '}$\n'
     FileClose $0
@@ -205,6 +185,8 @@ Section "Puente nativo (Native Messaging)" SecNativeHost
     WriteRegStr HKCU "Software\Chromium\NativeMessagingHosts\${NATIVE_HOST_NAME}" "" "$INSTDIR\com.sdm.bridge.chrome.json"
     WriteRegStr HKCU "Software\Microsoft\Edge\NativeMessagingHosts\${NATIVE_HOST_NAME}" "" "$INSTDIR\com.sdm.bridge.chrome.json"
     WriteRegStr HKCU "Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\${NATIVE_HOST_NAME}" "" "$INSTDIR\com.sdm.bridge.chrome.json"
+    WriteRegStr HKCU "Software\Vivaldi\NativeMessagingHosts\${NATIVE_HOST_NAME}" "" "$INSTDIR\com.sdm.bridge.chrome.json"
+    WriteRegStr HKCU "Software\Opera Software\NativeMessagingHosts\${NATIVE_HOST_NAME}" "" "$INSTDIR\com.sdm.bridge.chrome.json"
     WriteRegStr HKCU "Software\Mozilla\NativeMessagingHosts\${NATIVE_HOST_NAME}" "" "$INSTDIR\com.sdm.bridge.firefox.json"
 SectionEnd
 
@@ -226,6 +208,8 @@ Section Uninstall
     DeleteRegKey HKCU "Software\Chromium\NativeMessagingHosts\${NATIVE_HOST_NAME}"
     DeleteRegKey HKCU "Software\Microsoft\Edge\NativeMessagingHosts\${NATIVE_HOST_NAME}"
     DeleteRegKey HKCU "Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\${NATIVE_HOST_NAME}"
+    DeleteRegKey HKCU "Software\Vivaldi\NativeMessagingHosts\${NATIVE_HOST_NAME}"
+    DeleteRegKey HKCU "Software\Opera Software\NativeMessagingHosts\${NATIVE_HOST_NAME}"
     DeleteRegKey HKCU "Software\Mozilla\NativeMessagingHosts\${NATIVE_HOST_NAME}"
     Delete "$INSTDIR\com.sdm.bridge.chrome.json"
     Delete "$INSTDIR\com.sdm.bridge.firefox.json"

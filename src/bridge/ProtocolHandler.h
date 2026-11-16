@@ -23,6 +23,9 @@ public:
     explicit ProtocolHandler(QObject* parent = nullptr);
 
     void setBridgeToken(const QString& token) { m_bridgeToken = token; }
+    /// Puerto del WebSocket local; se publica en getBridgeInfo para que la
+    /// extension pueda abrir el canal de respaldo sin configuracion manual.
+    void setBridgePort(quint16 port) { m_bridgePort = port; }
 
     /// Procesa un mensaje JSON entrante y devuelve la respuesta ("" si la
     /// respuesta la emite el motor de forma asincrona).
@@ -54,6 +57,7 @@ private:
     QElapsedTimer m_progressThrottle;
     QElapsedTimer m_statusThrottle;
     QString m_bridgeToken;
+    quint16 m_bridgePort = 0;
 };
 
 } // namespace sdm

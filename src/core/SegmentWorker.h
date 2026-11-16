@@ -45,6 +45,8 @@ struct SegmentRequest {
     int maxRetries = 3;        // Reintentos por fallo transitorio
     int connectTimeoutSec = 20;
     int totalTimeoutSec = 3600;
+    /// Limite de recepcion de esta conexion en bytes/s (CURLOPT_MAX_RECV_SPEED_LARGE).
+    qint64 maxBytesPerSec = 0;
 
     /// Tamano total del rango (-1 si es abierto).
     qint64 rangeSize() const {

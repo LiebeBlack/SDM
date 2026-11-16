@@ -55,6 +55,17 @@ private slots:
     void category_classification();
     void task_progressAndSums();
     void task_paths();
+
+    // --- Lotes estilo IDM ---------------------------------------------
+    void batch_numericRange();
+    void batch_zeroPadded();
+    void batch_alphaAndList();
+    void batch_maxScaleAndStep();
+    void batch_invalidAndPlainUrl();
+
+    // --- Duplicados y versiones --------------------------------------
+    void duplicate_normalizesUrl();
+    void versions_compare();
 };
 
 // --- Particionado ---------------------------------------------------------
@@ -263,6 +274,80 @@ void TestModels::task_paths() {
 
     task.destDir = QStringLiteral("/downloads/");
     QCOMPARE(task.savePath(), QStringLiteral("/downloads/a.zip"));
+}
+
+void TestModels::batch_numericRange() {
+    QVERIFY(containsBatchPattern(QStringLiteral("http://x/a[1-3].zip")));
+    const QStringList urls = expandBatchPattern(QStringLiteral("http://x/a[1-3].zip"));
+    QCOMPARE(urls.size(), 3);
+    QCOMPARE(urls.at(0), QStringLiteral("http://x/a1.zip"));
+    QCOMPARE(urls.at(2), QStringLiteral("http://x/a3.zip"));
+}
+
+void TestModels::batch_zeroPadded() {
+    const QStringList urls = expandBatchPattern(QStringLiteral("http://x/p[08-10].bin"));
+    QCOMPARE(urls.size(), 3);
+    QCOMPARE(urls.at(0), QStringLiteral("http://x/p08.bin"));
+    QCOMPARE(urls.at(1), QStringLiteral("http://x/p09.bin"));
+    QCOMPARE(urls.at(2), QStringLiteral("http://x/p10.bin"));
+}
+
+void TestModels::batch_alphaAndList() {
+    const QStringList letters = expandBatchPattern(QStringLiteral("http://x/[a-c]/f.bin"));
+    QCOMPARE(letters.size(), 3);
+    QCOMPARE(letters.at(0), QStringLiteral("http://x/a/f.bin"));
+    QCOMPARE(letters.at(2), QStringLiteral("http://x/c/f.bin"));
+
+    const QStringList list = expandBatchPattern(QStringLiteral("http://x/f[1,3,7].zip"));
+    QCOMPARE(list.size(), 3);
+    QCOMPARE(list.at(0), QStringLiteral("http://x/f1.zip"));
+    QCOMPARE(list.at(1), QStringLiteral("http://x/f3.zip"));
+    QCOMPARE(list.at(2), QStringLiteral("http://x/f7.zip"));
+
+    // Varios grupos por URL.
+    const QStringList groups = expandBatchPattern(QStringLiteral("http://x/[1-2]/v[01-02].ts"));
+    QCOMPARE(groups.size(), 4);
+    QCOMPARE(groups.at(0), QStringLiteral("http://x/1/v01.ts"));
+    QCOMPARE(groups.at(3), QStringLiteral("http://x/2/v02.ts"));
+}
+
+void TestModels::batch_maxScaleAndStep() {
+    const QStringList stepped = expandBatchPattern(QStringLiteral("http://x/f[0-10:5].bin"));
+    QCOMPARE(stepped.size(), 3);
+    QCOMPARE(stepped.at(1), QStringLiteral("http://x/f5.bin"));
+
+    // `limit` acota patrones enormes.
+    const QStringList capped = expandBatchPattern(QStringLiteral("http://x/f[1-100000].bin"), 50);
+    QCOMPARE(capped.size(), 50);
+}
+
+void TestModels::batch_invalidAndPlainUrl() {
+    QVERIFY(!containsBatchPattern(QStringLiteral("http://x/a.zip")));
+    QCOMPARE(expandBatchPattern(QStringLiteral("http://x/a.zip")).size(), 1);
+    // Corchetes sin rango utilizable: se interpretan como texto literal.
+    const QStringList literal = expandBatchPattern(QStringLiteral("http://x/a[zz].zip"));
+    QCOMPARE(literal.size(), 1);
+    QCOMPARE(literal.at(0), QStringLiteral("http://x/azz.zip"));
+    // Limite 0 no genera nada.
+    QCOMPARE(expandBatchPattern(QStringLiteral("http://x/f[1-3].bin"), 0).size(), 0);
+}
+
+void TestModels::duplicate_normalizesUrl() {
+    QCOMPARE(normalizeUrlForCompare(QStringLiteral("HTTP://Example.COM/a.zip#x")),
+             normalizeUrlForCompare(QStringLiteral("http://example.com/a.zip")));
+    QVERIFY(normalizeUrlForCompare(QStringLiteral("http://a/b.zip?x=1")) !=
+            normalizeUrlForCompare(QStringLiteral("http://a/b.zip?x=2")));
+    QCOMPARE(normalizeUrlForCompare(QStringLiteral("  http://a/b.zip  ")),
+             normalizeUrlForCompare(QStringLiteral("http://a/b.zip")));
+}
+
+void TestModels::versions_compare() {
+    QVERIFY(compareVersions(QStringLiteral("1.0.1"), QStringLiteral("1.0.0")) > 0);
+    QVERIFY(compareVersions(QStringLiteral("1.0.0"), QStringLiteral("1.0.1")) < 0);
+    QCOMPARE(compareVersions(QStringLiteral("v1.0.0"), QStringLiteral("1.0.0")), 0);
+    QCOMPARE(compareVersions(QStringLiteral("1.0"), QStringLiteral("1.0.0")), 0);
+    QVERIFY(compareVersions(QStringLiteral("1.10.0"), QStringLiteral("1.9.9")) > 0);
+    QCOMPARE(compareVersions(QStringLiteral("2.0.0-beta.1"), QStringLiteral("2.0.0")), 0);
 }
 
 QTEST_GUILESS_MAIN(TestModels)

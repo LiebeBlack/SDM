@@ -334,6 +334,14 @@ QByteArray ProtocolHandler::process(const QByteArray& raw) {
         json body;
         body["version"] = kAppVersion;
         body["total"] = engine.taskCount();
+        // La extension recibe aqui el puerto y el token para abrir el canal
+        // WebSocket de respaldo sin que el usuario configure nada. La conexion
+        // ya esta autenticada (WebSocketServer valida el token al conectar y
+        // el mensaje hello lo revalida), asi que no se expone nada nuevo.
+        body["port"] = static_cast<int>(m_bridgePort);
+        if (!m_bridgeToken.isEmpty()) {
+            body["token"] = m_bridgeToken.toStdString();
+        }
         return toBytes(makeObject(QStringLiteral("bridgeInfo"), body, ref));
     }
 

@@ -50,6 +50,13 @@ struct EngineSettings {
     QString ytDlpPath = QStringLiteral("yt-dlp");
     int maxRetries = kDefaultMaxRetries;
     int streamChoiceTimeoutSec = 60;            // Auto-mejor variante si nadie elige
+    /// Limite de velocidad por tarea en KiB/s (0 = sin limite). Se reparte
+    /// entre los segmentos activos de cada tarea (estilo IDM).
+    int speedLimitKbps = 0;
+    /// Ignora altas repetidas de la misma URL mientras siga activa (estilo IDM).
+    bool skipDuplicateTasks = true;
+    /// Guarda cada descarga en <destino>/<categoria> (Videos, Musica, ...).
+    bool organizeByCategory = false;
 };
 
 /// Resultado de la sonda (almacenado temporalmente, hilo de pool -> GUI).
@@ -103,6 +110,9 @@ public:
 
     /// Instantanea serializable de una tarea (para el protocolo IPC).
     static QVariantMap snapshot(const DownloadTask& task);
+
+    /// Tarea activa (no terminada) con la misma URL normalizada, o 0.
+    quint64 findDuplicateTask(const QString& url) const;
 
     /// Numero de hilos efectivas para una tarea (soportadas: 1/6/8/16).
     static int normalizeThreadCount(int threads);

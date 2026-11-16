@@ -13,6 +13,7 @@
 #include <QMap>
 #include <QString>
 #include <QStringList>
+#include <QUrl>
 #include <QtGlobal>
 
 #include <algorithm>
@@ -387,6 +388,162 @@ inline QString fileNameFromUrl(const QString& url) {
         name = QStringLiteral("descarga.bin");
     }
     return name;
+}
+
+/// Normaliza una URL para comparar duplicados: quita el fragmento, la barra
+/// final redundante y pasa esquema y host a minusculas.
+inline QString normalizeUrlForCompare(const QString& url) {
+    const QString trimmed = url.trimmed();
+    const QUrl parsed(trimmed);
+    if (!parsed.isValid() || parsed.host().isEmpty()) {
+        return trimmed.toLower();
+    }
+    QUrl copy = parsed;
+    copy.setFragment(QString());
+    copy.setScheme(copy.scheme().toLower());
+    copy.setHost(copy.host().toLower());
+    return copy.toString(QUrl::FullyEncoded);
+}
+
+/// Compara dos versiones con formato "1.2.3" (ignora prefijos tipo `v`).
+/// Devuelve <0 si `a` < `b`, 0 si son equivalentes y >0 si `a` > `b`.
+inline int compareVersions(const QString& a, const QString& b) {
+    auto normalize = [](const QString& text) {
+        QString value = text.trimmed();
+        while (!value.isEmpty() &&
+               (value.startsWith(QLatin1Char('v')) || value.startsWith(QLatin1Char('V')))) {
+            value.remove(0, 1);
+        }
+        // Desprecia sufijos de pre-release (-beta.1, +build): compara solo numeros.
+        for (int i = 0; i < value.size(); ++i) {
+            const QChar ch = value.at(i);
+            if (ch == QLatin1Char('-') || ch == QLatin1Char('+')) {
+                value = value.left(i);
+                break;
+            }
+        }
+        return value.split(QLatin1Char('.'));
+    };
+    const QStringList left = normalize(a);
+    const QStringList right = normalize(b);
+    const int count = (std::max)(left.size(), right.size());
+    for (int i = 0; i < count; ++i) {
+        const int l = i < left.size() ? left.at(i).toInt() : 0;
+        const int r = i < right.size() ? right.at(i).toInt() : 0;
+        if (l != r) {
+            return l < r ? -1 : 1;
+        }
+    }
+    return 0;
+}
+
+/// Comprueba si una URL trae un patron de lote estilo IDM (`archivo[01-10].zip`).
+inline bool containsBatchPattern(const QString& url) {
+    const int open = url.indexOf(QLatin1Char('['));
+    if (open < 0) {
+        return false;
+    }
+    return url.indexOf(QLatin1Char(']'), open) > open + 1;
+}
+
+/// Expande un patron de lote estilo IDM a la lista de URLs resultante.
+///
+/// Formatos admitidos dentro de los corchetes (varios grupos por URL):
+///   [1-10]      numerico ascendente
+///   [01-10]     numerico con relleno de ceros (01, 02, ...)
+///   [a-z]       alfabetico (tambien [A-Z])
+///   [1,3,7]     lista explicita
+///   [0-100:10]  rango con paso
+///
+/// `limit` acota el numero de URLs generadas (evita patrones explosivos).
+inline QStringList expandBatchPattern(const QString& pattern, int limit = 2000) {
+    QStringList out;
+    if (limit <= 0) {
+        return out;
+    }
+    const int open = pattern.indexOf(QLatin1Char('['));
+    const int close = open < 0 ? -1 : pattern.indexOf(QLatin1Char(']'), open);
+    if (open < 0 || close < 0) {
+        out.append(pattern);
+        return out;
+    }
+
+    const QString prefix = pattern.left(open);
+    const QString suffix = pattern.mid(close + 1);
+    const QString spec = pattern.mid(open + 1, close - open - 1);
+
+    QStringList values;
+    const QStringList parts = spec.split(QLatin1Char(','), Qt::SkipEmptyParts);
+    for (const QString& rawPart : parts) {
+        QString part = rawPart.trimmed();
+        if (part.isEmpty()) {
+            continue;
+        }
+        int step = 1;
+        const int colon = part.indexOf(QLatin1Char(':'));
+        if (colon > 0) {
+            const int parsedStep = part.mid(colon + 1).toInt();
+            part = part.left(colon);
+            if (parsedStep > 0) {
+                step = parsedStep;
+            }
+        }
+        int dash = part.indexOf(QLatin1Char('-'));
+        if (dash == 0) {
+            dash = part.indexOf(QLatin1Char('-'), 1); // permite valores negativos
+        }
+        const QString from = dash < 0 ? part : part.left(dash);
+        const QString to = dash < 0 ? part : part.mid(dash + 1);
+        if (from.isEmpty()) {
+            continue;
+        }
+
+        bool fromIsNumber = false;
+        bool toIsNumber = false;
+        const int firstNumber = from.toInt(&fromIsNumber);
+        const int lastNumber = to.isEmpty() ? firstNumber : to.toInt(&toIsNumber);
+        if (fromIsNumber && (to.isEmpty() || toIsNumber)) {
+            const int width =
+                (from.size() > 1 && from.startsWith(QLatin1Char('0'))) ? from.size() : 0;
+            for (int value = firstNumber; value <= lastNumber && values.size() < limit;
+                 value += step) {
+                values.append(width > 0
+                                  ? QStringLiteral("%1").arg(value, width, 10, QLatin1Char('0'))
+                                  : QString::number(value));
+            }
+            continue;
+        }
+
+        if (from.size() == 1 && (to.isEmpty() || to.size() == 1)) {
+            const QChar firstChar = from.at(0);
+            const QChar lastChar = to.isEmpty() ? firstChar : to.at(0);
+            if (firstChar.unicode() <= lastChar.unicode()) {
+                for (int code = firstChar.unicode();
+                     code <= lastChar.unicode() && values.size() < limit; code += step) {
+                    values.append(QString(QChar(static_cast<char16_t>(code))));
+                }
+                continue;
+            }
+        }
+
+        values.append(part); // literal sin rango utilizable
+    }
+
+    if (values.isEmpty()) {
+        out.append(pattern); // patron invalido: se deja tal cual
+        return out;
+    }
+
+    for (const QString& value : values) {
+        const QStringList expanded = expandBatchPattern(prefix + value + suffix, limit);
+        for (const QString& url : expanded) {
+            if (out.size() >= limit) {
+                return out;
+            }
+            out.append(url);
+        }
+    }
+    return out;
 }
 
 /// Elimina caracteres prohibidos en nombres de archivo (Windows/POSIX).

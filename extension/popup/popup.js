@@ -67,6 +67,59 @@ function renderState(state) {
   renderBlocked(state.blockedSites || []);
 }
 
+const MEDIA_LABEL = { hls: "HLS", dash: "DASH", file: "Vídeo" };
+
+function renderMedia(items) {
+  const list = $("media-list");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!items || items.length === 0) {
+    const li = document.createElement("li");
+    li.innerHTML = "<span style='color:#c5c5c5'>Sin medios detectados en esta página</span>";
+    list.appendChild(li);
+    return;
+  }
+  for (const item of items) {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = `${MEDIA_LABEL[item.kind] || "Medio"} · ${item.url.split("/").pop().slice(0, 28)}`;
+    name.title = item.url;
+    const button = document.createElement("button");
+    button.className = "secondary";
+    button.textContent = "⬇";
+    button.title = "Descargar con SDM";
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      const response = await send({
+        type: "sdm:startStream",
+        payload: { url: item.url, referer: "", title: "" }
+      });
+      button.textContent = response.ok ? "✓" : "✕";
+      setTimeout(() => {
+        button.disabled = false;
+        button.textContent = "⬇";
+      }, 2000);
+    });
+    li.appendChild(name);
+    li.appendChild(button);
+    list.appendChild(li);
+  }
+}
+
+function refreshMediaPanel() {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs && tabs[0];
+    if (!tab) return;
+    chrome.tabs.sendMessage(tab.id, { type: "sdm:collectMedia" }, (response) => {
+      if (chrome.runtime.lastError || !response || !response.ok) {
+        renderMedia([]);
+        return;
+      }
+      renderMedia(response.items || []);
+    });
+  });
+}
+
 function renderBlocked(sites) {
   const list = $("blocked-list");
   list.innerHTML = "";
@@ -237,5 +290,6 @@ function bindControls() {
 document.addEventListener("DOMContentLoaded", () => {
   bindControls();
   refresh();
+  refreshMediaPanel();
   setInterval(refresh, 2000);
 });
