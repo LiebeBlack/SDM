@@ -58,25 +58,26 @@ QString redactSecrets(const QString& text) {
     if (text.isEmpty()) {
         return text;
     }
-    // Parametros de consulta (token=..., cookies=...): son los que llevan mas
-    // riesgo porque el protocolo y los logs de curl los incluyen tal cual.
+    // Parametros de consulta (token=..., cookies=...): es lo que el protocolo y
+    // los logs de curl incluyen tal cual.
     static const QRegularExpression kParams(
-        QStringLiteral("(?i)\b(token|access_token|api_key|password|cookies|httpPass)"
-                       "=([^&\s\"']+)"));
+        QStringLiteral("(?i)\\b(token|access_token|api_key|password|cookies|httpPass)"")
+        QStringLiteral("=([^&\\s\"']+)"));
     // Campos JSON del protocolo: {"token":"...", "cookies":"..."}
-    static const QRegularExpression kJsonFields(QStringLiteral(
-        "(?i)\"(token|cookies|httpPass|password|access_token)\"\s*:\s*\"[^\"]*\""));
+    static const QRegularExpression kJsonFields(
+        QStringLiteral("(?i)\"(token|cookies|httpPass|password|access_token)\"\\s*:\\s*\"[^\"]*\""));
     // Cabeceras HTTP sensibles.
-    static const QRegularExpression kHeaders(QStringLiteral(
-        "(?i)\b(authorization|proxy-authorization|cookie|set-cookie)\s*:\s*[^\r\n]+"));
+    static const QRegularExpression kHeaders(
+        QStringLiteral("(?i)\\b(authorization|proxy-authorization|cookie|set-cookie)\\s*:\\s*[^\\r\\n]+"));
     // Credenciales embebidas: http://usuario:clave@host/...
-    static const QRegularExpression kUrlCredentials(QStringLiteral("(://[^/:@\s]+):([^@\s]+)@"));
+    static const QRegularExpression kUrlCredentials(
+        QStringLiteral("(://[^/:@\\s]+):([^@\\s]+)@"));
 
     QString safe = text;
-    safe.replace(kParams, QStringLiteral("\1=***"));
-    safe.replace(kJsonFields, QStringLiteral("\"\1\":\"***\""));
-    safe.replace(kHeaders, QStringLiteral("\1: ***"));
-    safe.replace(kUrlCredentials, QStringLiteral("\1:***@"));
+    safe.replace(kParams, QStringLiteral("\\1=***"));
+    safe.replace(kJsonFields, QStringLiteral("\"\\1\":\"***\""));
+    safe.replace(kHeaders, QStringLiteral("\\1: ***"));
+    safe.replace(kUrlCredentials, QStringLiteral("\\1:***@"));
     return safe;
 }
 
